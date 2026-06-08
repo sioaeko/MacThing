@@ -22,8 +22,8 @@ private struct TopBar: View {
     @EnvironmentObject private var store: SearchStore
 
     var body: some View {
-        VStack(spacing: 7) {
-            HStack(spacing: 8) {
+        VStack(spacing: 10) {
+            HStack(spacing: 12) {
                 SearchField(
                     text: Binding(
                         get: { store.query },
@@ -35,424 +35,500 @@ private struct TopBar: View {
                         }
                     }
                 )
-                .frame(minWidth: 220)
-                .layoutPriority(1)
+                .frame(minWidth: 420, maxWidth: .infinity)
+                .layoutPriority(2)
 
-                Menu {
-                    if store.searchHistory.isEmpty {
-                        Text("No History")
-                    } else {
-                        ForEach(store.searchHistory) { item in
-                            Button {
-                                store.applyHistoryItem(item)
-                            } label: {
-                                Text(item.query)
-                            }
-                        }
-
-                        Divider()
-
-                        Menu("Remove") {
-                            ForEach(store.searchHistory) { item in
-                                Button(role: .destructive) {
-                                    store.removeHistoryItem(item)
-                                } label: {
-                                    Text(item.query)
-                                }
-                            }
-                        }
-
-                        Button(role: .destructive) {
-                            store.clearSearchHistory()
-                        } label: {
-                            Label("Clear", systemImage: "trash")
-                        }
-                    }
-                } label: {
-                    ToolbarIcon(systemName: "clock.arrow.circlepath")
+                ToolbarCluster {
+                    SearchHistoryMenu()
+                    UserFiltersMenu()
                 }
-                .help("Search history")
 
-                Menu {
+                ToolbarCluster {
                     Button {
-                        store.addUserFilter()
+                        store.chooseRoot()
                     } label: {
-                        Label("Add Filter", systemImage: "line.3.horizontal.decrease.circle")
+                        ToolbarIcon(systemName: "folder")
                     }
+                    .help("Choose folder")
 
-                    if !store.userFilters.isEmpty {
-                        Divider()
-
-                        ForEach(store.userFilters) { filter in
-                            Button {
-                                store.applyUserFilter(filter)
-                            } label: {
-                                Text(filter.name)
-                            }
-                        }
-
-                        Divider()
-
-                        Menu("Remove") {
-                            ForEach(store.userFilters) { filter in
-                                Button(role: .destructive) {
-                                    store.removeUserFilter(filter)
-                                } label: {
-                                    Text(filter.name)
-                                }
-                            }
-                        }
+                    Button {
+                        store.reindexCurrentRoot()
+                    } label: {
+                        ToolbarIcon(systemName: "arrow.clockwise")
                     }
-                } label: {
-                    ToolbarIcon(systemName: "line.3.horizontal.decrease.circle")
-                }
-                .help("User filters")
+                    .disabled(store.isIndexing)
+                    .help("Reindex")
 
-                Picker(
-                    "",
-                    selection: Binding(
-                        get: { store.activeFilter },
-                        set: { store.setFilter($0) }
-                    )
-                ) {
-                    ForEach(ResultFilter.allCases) { filter in
-                        Text(filter.displayName)
-                            .tag(filter)
-                    }
+                    MoreMenu()
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 252)
-
-                Button {
-                    store.chooseRoot()
-                } label: {
-                    ToolbarIcon(systemName: "folder")
-                }
-                .help("Choose folder")
-
-                Button {
-                    store.reindexCurrentRoot()
-                } label: {
-                    ToolbarIcon(systemName: "arrow.clockwise")
-                }
-                .disabled(store.isIndexing)
-                .help("Reindex")
             }
 
-            HStack(spacing: 6) {
-                Button {
-                    store.openSelected()
-                } label: {
-                    ToolbarIcon(systemName: "arrow.up.forward.square")
-                }
-                .disabled(store.selectedEntry == nil)
-                .help("Open")
+            HStack(spacing: 12) {
+                FilterPicker()
+                    .frame(minWidth: 520, idealWidth: 580, maxWidth: 660)
+                    .layoutPriority(1)
 
-                Button {
-                    store.revealSelected()
-                } label: {
-                    ToolbarIcon(systemName: "finder")
-                }
-                .disabled(store.selectedEntry == nil)
-                .help("Reveal in Finder")
+                Spacer(minLength: 20)
 
-                Button {
-                    store.copySelectedPath()
-                } label: {
-                    ToolbarIcon(systemName: "doc.on.doc")
-                }
-                .disabled(store.selectedEntry == nil)
-                .help("Copy path")
-
-                ToolbarDivider()
-
-                Menu {
-                Menu("File Lists") {
+                ToolbarCluster {
                     Button {
-                        store.importFileList()
+                        store.openSelected()
                     } label: {
-                        Label("Import", systemImage: "tray.and.arrow.down")
+                        ToolbarIcon(systemName: "arrow.up.forward.square")
+                    }
+                    .disabled(store.selectedEntry == nil)
+                    .help("Open")
+
+                    Button {
+                        store.revealSelected()
+                    } label: {
+                        ToolbarIcon(systemName: "finder")
+                    }
+                    .disabled(store.selectedEntry == nil)
+                    .help("Reveal in Finder")
+
+                    Button {
+                        store.copySelectedPath()
+                    } label: {
+                        ToolbarIcon(systemName: "doc.on.doc")
+                    }
+                    .disabled(store.selectedEntry == nil)
+                    .help("Copy path")
+                }
+
+                ToolbarCluster {
+                    SortMenu()
+                    ToolbarGroupDivider()
+                    MatchOptionButtons()
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+}
+
+private struct FilterPicker: View {
+    @EnvironmentObject private var store: SearchStore
+
+    var body: some View {
+        Picker(
+            "",
+            selection: Binding(
+                get: { store.activeFilter },
+                set: { store.setFilter($0) }
+            )
+        ) {
+            ForEach(ResultFilter.allCases) { filter in
+                Text(filter.displayName)
+                    .tag(filter)
+            }
+        }
+        .pickerStyle(.segmented)
+    }
+}
+
+private struct SearchHistoryMenu: View {
+    @EnvironmentObject private var store: SearchStore
+
+    var body: some View {
+        Menu {
+            if store.searchHistory.isEmpty {
+                Text("No History")
+            } else {
+                ForEach(store.searchHistory) { item in
+                    Button {
+                        store.applyHistoryItem(item)
+                    } label: {
+                        Text(item.query)
+                    }
+                }
+
+                Divider()
+
+                Menu("Remove") {
+                    ForEach(store.searchHistory) { item in
+                        Button(role: .destructive) {
+                            store.removeHistoryItem(item)
+                        } label: {
+                            Text(item.query)
+                        }
+                    }
+                }
+
+                Button(role: .destructive) {
+                    store.clearSearchHistory()
+                } label: {
+                    Label("Clear", systemImage: "trash")
+                }
+            }
+        } label: {
+            ToolbarIcon(systemName: "clock.arrow.circlepath")
+        }
+        .help("Search history")
+    }
+}
+
+private struct UserFiltersMenu: View {
+    @EnvironmentObject private var store: SearchStore
+
+    var body: some View {
+        Menu {
+            Button {
+                store.addUserFilter()
+            } label: {
+                Label("Add Filter", systemImage: "line.3.horizontal.decrease.circle")
+            }
+
+            if !store.userFilters.isEmpty {
+                Divider()
+
+                ForEach(store.userFilters) { filter in
+                    Button {
+                        store.applyUserFilter(filter)
+                    } label: {
+                        Text(filter.name)
+                    }
+                }
+
+                Divider()
+
+                Menu("Remove") {
+                    ForEach(store.userFilters) { filter in
+                        Button(role: .destructive) {
+                            store.removeUserFilter(filter)
+                        } label: {
+                            Text(filter.name)
+                        }
+                    }
+                }
+            }
+        } label: {
+            ToolbarIcon(systemName: "line.3.horizontal.decrease.circle")
+        }
+        .help("User filters")
+    }
+}
+
+private struct MoreMenu: View {
+    @EnvironmentObject private var store: SearchStore
+
+    var body: some View {
+        Menu {
+            Menu("File Lists") {
+                Button {
+                    store.importFileList()
+                } label: {
+                    Label("Import", systemImage: "tray.and.arrow.down")
+                }
+
+                if !store.fileListSources.isEmpty {
+                    Divider()
+
+                    ForEach(store.fileListSources) { source in
+                        Button {
+                            store.toggleFileListSource(source)
+                        } label: {
+                            HStack {
+                                Text("\(source.displayName) (\(source.itemCount.formatted()))")
+                                if source.isEnabled {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
                     }
 
-                    if !store.fileListSources.isEmpty {
-                        Divider()
+                    Divider()
 
+                    Menu("Refresh") {
                         ForEach(store.fileListSources) { source in
                             Button {
-                                store.toggleFileListSource(source)
+                                store.refreshFileListSource(source)
+                            } label: {
+                                Text(source.displayName)
+                            }
+                        }
+                    }
+
+                    Menu("Remove") {
+                        ForEach(store.fileListSources) { source in
+                            Button(role: .destructive) {
+                                store.removeFileListSource(source)
+                            } label: {
+                                Text(source.displayName)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Menu("Bookmarks") {
+                Button {
+                    store.addBookmark()
+                } label: {
+                    Label("Add Bookmark", systemImage: "bookmark")
+                }
+
+                if !store.bookmarks.isEmpty {
+                    Divider()
+
+                    ForEach(store.bookmarks) { bookmark in
+                        Button {
+                            store.applyBookmark(bookmark)
+                        } label: {
+                            Text(bookmark.name)
+                        }
+                    }
+
+                    Divider()
+
+                    Menu("Remove") {
+                        ForEach(store.bookmarks) { bookmark in
+                            Button(role: .destructive) {
+                                store.removeBookmark(bookmark)
+                            } label: {
+                                Text(bookmark.name)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Menu("Volumes") {
+                Button {
+                    store.refreshVolumes()
+                } label: {
+                    Label("Refresh Volumes", systemImage: "arrow.clockwise")
+                }
+
+                if !store.volumeProfiles.isEmpty {
+                    Divider()
+
+                    ForEach(store.volumeProfiles) { profile in
+                        Button {
+                            store.indexVolume(profile)
+                        } label: {
+                            Text(profile.displayName)
+                        }
+                    }
+                }
+            }
+
+            Menu("Index Profiles") {
+                Button {
+                    store.addProfileForCurrentRoot()
+                } label: {
+                    Label("Add Current Root", systemImage: "plus")
+                }
+
+                if !store.indexProfiles.isEmpty {
+                    Divider()
+
+                    ForEach(store.indexProfiles) { profile in
+                        Button {
+                            store.activateProfile(profile)
+                        } label: {
+                            Text(store.currentProfileLabel(profile))
+                        }
+                    }
+
+                    Divider()
+
+                    Menu("Search In") {
+                        ForEach(store.indexProfiles) { profile in
+                            Button {
+                                store.toggleProfileSearch(profile)
                             } label: {
                                 HStack {
-                                    Text("\(source.displayName) (\(source.itemCount.formatted()))")
-                                    if source.isEnabled {
+                                    Text(profile.displayName)
+                                    if profile.isEnabled {
                                         Image(systemName: "checkmark")
                                     }
                                 }
                             }
                         }
-
-                        Divider()
-
-                        Menu("Refresh") {
-                            ForEach(store.fileListSources) { source in
-                                Button {
-                                    store.refreshFileListSource(source)
-                                } label: {
-                                    Text(source.displayName)
-                                }
-                            }
-                        }
-
-                        Menu("Remove") {
-                            ForEach(store.fileListSources) { source in
-                                Button(role: .destructive) {
-                                    store.removeFileListSource(source)
-                                } label: {
-                                    Text(source.displayName)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Menu("Bookmarks") {
-                    Button {
-                        store.addBookmark()
-                    } label: {
-                        Label("Add Bookmark", systemImage: "bookmark")
                     }
 
-                    if !store.bookmarks.isEmpty {
-                        Divider()
-
-                        ForEach(store.bookmarks) { bookmark in
-                            Button {
-                                store.applyBookmark(bookmark)
-                            } label: {
-                                Text(bookmark.name)
-                            }
-                        }
-
-                        Divider()
-
-                        Menu("Remove") {
-                            ForEach(store.bookmarks) { bookmark in
-                                Button(role: .destructive) {
-                                    store.removeBookmark(bookmark)
-                                } label: {
-                                    Text(bookmark.name)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Menu("Volumes") {
-                    Button {
-                        store.refreshVolumes()
-                    } label: {
-                        Label("Refresh Volumes", systemImage: "arrow.clockwise")
-                    }
-
-                    if !store.volumeProfiles.isEmpty {
-                        Divider()
-
-                        ForEach(store.volumeProfiles) { profile in
-                            Button {
-                                store.indexVolume(profile)
+                    Menu("Remove") {
+                        ForEach(store.indexProfiles) { profile in
+                            Button(role: .destructive) {
+                                store.removeProfile(profile)
                             } label: {
                                 Text(profile.displayName)
                             }
                         }
                     }
                 }
+            }
 
-                Menu("Index Profiles") {
+            Menu("Index Exclusions") {
+                IndexExclusionMenuContent()
+            }
+
+            Menu("Columns") {
+                ForEach(ResultColumn.allCases) { column in
                     Button {
-                        store.addProfileForCurrentRoot()
+                        store.toggleColumn(column)
                     } label: {
-                        Label("Add Current Root", systemImage: "plus")
-                    }
-
-                    if !store.indexProfiles.isEmpty {
-                        Divider()
-
-                        ForEach(store.indexProfiles) { profile in
-                            Button {
-                                store.activateProfile(profile)
-                            } label: {
-                                Text(store.currentProfileLabel(profile))
-                            }
-                        }
-
-                        Divider()
-
-                        Menu("Search In") {
-                            ForEach(store.indexProfiles) { profile in
-                                Button {
-                                    store.toggleProfileSearch(profile)
-                                } label: {
-                                    HStack {
-                                        Text(profile.displayName)
-                                        if profile.isEnabled {
-                                            Image(systemName: "checkmark")
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        Menu("Remove") {
-                            ForEach(store.indexProfiles) { profile in
-                                Button(role: .destructive) {
-                                    store.removeProfile(profile)
-                                } label: {
-                                    Text(profile.displayName)
-                                }
+                        HStack {
+                            Text(column.displayName)
+                            if store.visibleColumns.contains(column) {
+                                Image(systemName: "checkmark")
                             }
                         }
                     }
                 }
+            }
 
-                Menu("Index Exclusions") {
-                    IndexExclusionMenuContent()
-                }
-
-                Menu("Columns") {
-                    ForEach(ResultColumn.allCases) { column in
-                        Button {
-                            store.toggleColumn(column)
-                        } label: {
-                            HStack {
-                                Text(column.displayName)
-                                if store.visibleColumns.contains(column) {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Menu("Global Hotkey") {
-                    ForEach(GlobalHotkeyChoice.allCases) { choice in
-                        Button {
-                            store.setGlobalHotkeyChoice(choice)
-                        } label: {
-                            HStack {
-                                Text(choice.displayName)
-                                if store.globalHotkeyChoice == choice {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Menu("Diagnostics") {
+            Menu("Global Hotkey") {
+                ForEach(GlobalHotkeyChoice.allCases) { choice in
                     Button {
-                        store.refreshPermissionDiagnostics()
+                        store.setGlobalHotkeyChoice(choice)
                     } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                    }
-
-                    Button {
-                        store.openFullDiskAccessSettings()
-                    } label: {
-                        Label("Full Disk Access", systemImage: "lock.shield")
-                    }
-
-                    if !store.permissionIssues.isEmpty {
-                        Divider()
-
-                        ForEach(store.permissionIssues) { issue in
-                            Text(issue.title)
-                            Text(issue.detail)
+                        HStack {
+                            Text(choice.displayName)
+                            if store.globalHotkeyChoice == choice {
+                                Image(systemName: "checkmark")
+                            }
                         }
                     }
                 }
+            }
 
-                Divider()
+            Menu("Diagnostics") {
+                Button {
+                    store.refreshPermissionDiagnostics()
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
 
                 Button {
-                    store.exportVisibleResults()
+                    store.openFullDiskAccessSettings()
                 } label: {
-                    Label("Export Visible Results", systemImage: "square.and.arrow.up")
+                    Label("Full Disk Access", systemImage: "lock.shield")
                 }
-                .disabled(store.results.isEmpty)
+
+                if !store.permissionIssues.isEmpty {
+                    Divider()
+
+                    ForEach(store.permissionIssues) { issue in
+                        Text(issue.title)
+                        Text(issue.detail)
+                    }
+                }
+            }
+
+            Divider()
+
+            Button {
+                store.exportVisibleResults()
+            } label: {
+                Label("Export Visible Results", systemImage: "square.and.arrow.up")
+            }
+            .disabled(store.results.isEmpty)
+        } label: {
+            ToolbarIcon(systemName: "ellipsis.circle")
+        }
+        .help("More")
+    }
+}
+
+private struct SortMenu: View {
+    @EnvironmentObject private var store: SearchStore
+
+    var body: some View {
+        Menu {
+            ForEach(SearchSortField.allCases, id: \.self) { field in
+                Button {
+                    store.setSort(field)
                 } label: {
-                    ToolbarIcon(systemName: "ellipsis.circle")
-                }
-                .help("More")
-
-                ToolbarDivider()
-
-                Spacer(minLength: 12)
-
-                Menu {
-                    ForEach(SearchSortField.allCases, id: \.self) { field in
-                        Button {
-                            store.setSort(field)
-                        } label: {
-                            HStack {
-                                Text(field.displayName)
-                                if store.sortField == field {
-                                    Image(systemName: store.sortDirection == .ascending ? "chevron.up" : "chevron.down")
-                                }
-                            }
+                    HStack {
+                        Text(field.displayName)
+                        if store.sortField == field {
+                            Image(systemName: store.sortDirection == .ascending ? "chevron.up" : "chevron.down")
                         }
                     }
-                } label: {
-                    ToolbarIcon(systemName: "arrow.up.arrow.down")
                 }
-                .help("Sort by")
-
-                ToolbarDivider()
-
-                ToggleButton(
-                    iconName: "text.magnifyingglass",
-                    isOn: store.searchOptions.matchPath,
-                    action: store.toggleMatchPath
-                )
-                .help("Match path")
-
-                ToggleButton(
-                    iconName: "sparkle.magnifyingglass",
-                    isOn: store.searchOptions.fuzzyMatching,
-                    action: store.toggleFuzzyMatching
-                )
-                .help("Fuzzy matching")
-
-                ToggleButton(
-                    iconName: "textformat.size",
-                    isOn: store.searchOptions.caseSensitive,
-                    action: store.toggleCaseSensitive
-                )
-                .help("Case sensitive")
-
-                ToggleButton(
-                    iconName: "chevron.left.forwardslash.chevron.right",
-                    isOn: store.searchOptions.regexMatching,
-                    action: store.toggleRegexMatching
-                )
-                .help("Regex")
-
-                ToggleButton(
-                    iconName: "text.word.spacing",
-                    isOn: store.searchOptions.wholeWordMatching,
-                    action: store.toggleWholeWordMatching
-                )
-                .help("Match whole word")
-
-                ToggleButton(
-                    iconName: "textformat.abc.dottedunderline",
-                    isOn: store.searchOptions.diacriticSensitive,
-                    action: store.toggleDiacriticSensitive
-                )
-                .help("Match diacritics")
             }
+        } label: {
+            ToolbarIcon(systemName: "arrow.up.arrow.down")
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .help("Sort by")
+    }
+}
+
+private struct MatchOptionButtons: View {
+    @EnvironmentObject private var store: SearchStore
+
+    var body: some View {
+        ToggleButton(
+            iconName: "text.magnifyingglass",
+            isOn: store.searchOptions.matchPath,
+            action: store.toggleMatchPath
+        )
+        .help("Match path")
+
+        ToggleButton(
+            iconName: "sparkle.magnifyingglass",
+            isOn: store.searchOptions.fuzzyMatching,
+            action: store.toggleFuzzyMatching
+        )
+        .help("Fuzzy matching")
+
+        ToggleButton(
+            iconName: "textformat.size",
+            isOn: store.searchOptions.caseSensitive,
+            action: store.toggleCaseSensitive
+        )
+        .help("Case sensitive")
+
+        ToggleButton(
+            iconName: "chevron.left.forwardslash.chevron.right",
+            isOn: store.searchOptions.regexMatching,
+            action: store.toggleRegexMatching
+        )
+        .help("Regex")
+
+        ToggleButton(
+            iconName: "text.word.spacing",
+            isOn: store.searchOptions.wholeWordMatching,
+            action: store.toggleWholeWordMatching
+        )
+        .help("Match whole word")
+
+        ToggleButton(
+            iconName: "textformat.abc.dottedunderline",
+            isOn: store.searchOptions.diacriticSensitive,
+            action: store.toggleDiacriticSensitive
+        )
+        .help("Match diacritics")
+    }
+}
+
+private struct ToolbarCluster<Content: View>: View {
+    let spacing: CGFloat
+    let content: Content
+
+    init(spacing: CGFloat = 4, @ViewBuilder content: () -> Content) {
+        self.spacing = spacing
+        self.content = content()
+    }
+
+    var body: some View {
+        HStack(spacing: spacing) {
+            content
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
+        .background(
+            RoundedRectangle(cornerRadius: 7)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.85))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(Color(nsColor: .separatorColor).opacity(0.75), lineWidth: 1)
+        )
     }
 }
 
@@ -469,7 +545,7 @@ private struct ToolbarIcon: View {
     }
 }
 
-private struct ToolbarDivider: View {
+private struct ToolbarGroupDivider: View {
     var body: some View {
         Rectangle()
             .fill(Color(nsColor: .separatorColor))
