@@ -13,6 +13,7 @@ APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 STAGING_DIR="$DIST_DIR/dmg-staging"
 DMG_PATH="$DIST_DIR/$APP_NAME-$VERSION.dmg"
 ICONSET_DIR="$DIST_DIR/$APP_NAME.iconset"
+ICON_DOC="${ICON_DOC:-$ROOT_DIR/Assets/$APP_NAME.icon}"
 EXECUTABLE_PATH="$ROOT_DIR/.build/$CONFIGURATION/$APP_NAME"
 
 rm -rf "$APP_BUNDLE" "$STAGING_DIR" "$ICONSET_DIR" "$DMG_PATH"
@@ -28,9 +29,71 @@ fi
 cp "$EXECUTABLE_PATH" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
-swift "$ROOT_DIR/Scripts/GenerateAppIcon.swift" \
-    "$ICONSET_DIR" \
-    "$APP_BUNDLE/Contents/Resources/$APP_NAME.icns"
+find_ictool() {
+    if [[ -n "${ICTOOL:-}" && -x "$ICTOOL" ]]; then
+        printf '%s\n' "$ICTOOL"
+        return 0
+    fi
+
+    local candidates=(
+        "/Applications/Icon Composer.app/Contents/Executables/ictool"
+        "$HOME/Applications/Icon Composer.app/Contents/Executables/ictool"
+        "/Volumes/Icon Composer 1/Icon Composer.app/Contents/Executables/ictool"
+    )
+
+    local candidate
+    for candidate in "${candidates[@]}"; do
+        if [[ -x "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    find /Volumes -path '*/Icon Composer.app/Contents/Executables/ictool' -print -quit 2>/dev/null
+}
+
+ICTOOL_PATH="$(find_ictool)"
+if [[ -z "$ICTOOL_PATH" || ! -x "$ICTOOL_PATH" ]]; then
+    echo "missing Icon Composer ictool; install or mount Icon Composer, or set ICTOOL=/path/to/ictool" >&2
+    exit 1
+fi
+
+if [[ ! -d "$ICON_DOC" ]]; then
+    echo "missing Icon Composer document: $ICON_DOC" >&2
+    exit 1
+fi
+
+mkdir -p "$ICONSET_DIR"
+
+export_icon_image() {
+    local output_file="$1"
+    local points="$2"
+    local scale="$3"
+
+    "$ICTOOL_PATH" "$ICON_DOC" \
+        --export-image \
+        --output-file "$output_file" \
+        --platform macOS \
+        --rendition Default \
+        --width "$points" \
+        --height "$points" \
+        --scale "$scale" >/dev/null
+}
+
+export_icon_image "$ICONSET_DIR/icon_16x16.png" 16 1
+export_icon_image "$ICONSET_DIR/icon_16x16@2x.png" 16 2
+export_icon_image "$ICONSET_DIR/icon_32x32.png" 32 1
+export_icon_image "$ICONSET_DIR/icon_32x32@2x.png" 32 2
+export_icon_image "$ICONSET_DIR/icon_128x128.png" 128 1
+export_icon_image "$ICONSET_DIR/icon_128x128@2x.png" 128 2
+export_icon_image "$ICONSET_DIR/icon_256x256.png" 256 1
+export_icon_image "$ICONSET_DIR/icon_256x256@2x.png" 256 2
+export_icon_image "$ICONSET_DIR/icon_512x512.png" 512 1
+export_icon_image "$ICONSET_DIR/icon_512x512@2x.png" 512 2
+
+iconutil --convert icns \
+    --output "$APP_BUNDLE/Contents/Resources/$APP_NAME.icns" \
+    "$ICONSET_DIR"
 
 cat > "$APP_BUNDLE/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

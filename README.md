@@ -183,6 +183,8 @@ search.
 - Menu bar extra provides quick search, show window, reindex, index status, and
   quit actions.
 - Bundled app builds can toggle launch-at-login from the menu bar extra.
+- Layered app icon source is stored as an Apple Icon Composer `.icon` document
+  and exported into the release bundle during packaging.
 - Visible results can be exported to CSV. Core exporters also produce TXT and
   EFU-like file-list output.
 - EFU-like file lists are stored as separate sources for offline/NAS/media
@@ -229,6 +231,14 @@ create a compressed DMG:
 ```sh
 chmod +x Scripts/package-mac.sh
 Scripts/package-mac.sh
+```
+
+Packaging requires Apple's Icon Composer because the app icon is exported from
+`Assets/MacThing.icon` with `ictool`. Install or mount Icon Composer, or point
+the script at the tool explicitly:
+
+```sh
+ICTOOL="/Applications/Icon Composer.app/Contents/Executables/ictool" Scripts/package-mac.sh
 ```
 
 The packaged outputs are written to:
