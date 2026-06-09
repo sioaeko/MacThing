@@ -5,20 +5,19 @@
       <stop offset="0.45" stop-color="#0A3B41"/>
       <stop offset="1" stop-color="#10151E"/>
     </linearGradient>
-    <radialGradient id="glowTop" cx="330" cy="224" r="520" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#67E7DB" stop-opacity="0.38"/>
-      <stop offset="0.58" stop-color="#67E7DB" stop-opacity="0.06"/>
+    <radialGradient id="glowTop" cx="318" cy="210" r="560" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#67E7DB" stop-opacity="0.30"/>
+      <stop offset="0.58" stop-color="#67E7DB" stop-opacity="0.05"/>
       <stop offset="1" stop-color="#67E7DB" stop-opacity="0"/>
     </radialGradient>
-    <radialGradient id="glowBottom" cx="758" cy="790" r="420" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#E8B858" stop-opacity="0.22"/>
-      <stop offset="0.62" stop-color="#E8B858" stop-opacity="0.04"/>
+    <radialGradient id="glowBottom" cx="770" cy="806" r="430" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#E8B858" stop-opacity="0.16"/>
+      <stop offset="0.62" stop-color="#E8B858" stop-opacity="0.03"/>
       <stop offset="1" stop-color="#E8B858" stop-opacity="0"/>
     </radialGradient>
   </defs>
   <rect x="70" y="70" width="884" height="884" rx="204" fill="url(#base)"/>
   <rect x="70" y="70" width="884" height="884" rx="204" fill="url(#glowTop)"/>
   <rect x="70" y="70" width="884" height="884" rx="204" fill="url(#glowBottom)"/>
-  <rect x="104" y="104" width="816" height="816" rx="174" fill="none" stroke="#FFFFFF" stroke-opacity="0.09" stroke-width="14"/>
-  <path d="M184 282C232 199 322 151 438 146" fill="none" stroke="#FFFFFF" stroke-opacity="0.14" stroke-width="18" stroke-linecap="round"/>
+  <rect x="108" y="108" width="808" height="808" rx="172" fill="none" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="12"/>
 </svg>

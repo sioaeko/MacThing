@@ -10,9 +10,9 @@
       <stop offset="1" stop-color="#8BECE1"/>
     </linearGradient>
   </defs>
-  <circle cx="430" cy="438" r="188" fill="#FFFFFF" fill-opacity="0.045"/>
-  <circle cx="430" cy="438" r="188" fill="none" stroke="url(#ring)" stroke-width="52"/>
-  <circle cx="430" cy="438" r="118" fill="none" stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="14"/>
-  <path d="M570 578L764 772" fill="none" stroke="url(#handle)" stroke-width="62" stroke-linecap="round"/>
-  <path d="M566 574L748 756" fill="none" stroke="#FFFFFF" stroke-opacity="0.18" stroke-width="14" stroke-linecap="round"/>
+  <circle cx="428" cy="426" r="186" fill="#FFFFFF" fill-opacity="0.035"/>
+  <circle cx="428" cy="426" r="186" fill="none" stroke="url(#ring)" stroke-width="54"/>
+  <circle cx="428" cy="426" r="116" fill="none" stroke="#FFFFFF" stroke-opacity="0.10" stroke-width="12"/>
+  <path d="M566 564L770 768" fill="none" stroke="url(#handle)" stroke-width="64" stroke-linecap="round"/>
+  <path d="M562 560L748 746" fill="none" stroke="#FFFFFF" stroke-opacity="0.15" stroke-width="12" stroke-linecap="round"/>
 </svg>

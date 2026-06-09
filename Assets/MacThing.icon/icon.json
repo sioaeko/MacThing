@@ -7,30 +7,6 @@
       "layers" : [
         {
           "glass" : false,
-          "image-name" : "highlight.svg",
-          "name" : "highlight",
-          "position" : {
-            "scale" : 1,
-            "translation-in-points" : [
-              0,
-              0
-            ]
-          }
-        }
-      ],
-      "shadow" : {
-        "kind" : "neutral",
-        "opacity" : 0.1
-      },
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.16
-      }
-    },
-    {
-      "layers" : [
-        {
-          "glass" : false,
           "image-name" : "lens.svg",
           "name" : "lens",
           "position" : {
@@ -44,36 +20,12 @@
       ],
       "shadow" : {
         "kind" : "neutral",
-        "opacity" : 0.28
+        "opacity" : 0.22
       },
       "specular" : true,
       "translucency" : {
         "enabled" : true,
-        "value" : 0.12
-      }
-    },
-    {
-      "layers" : [
-        {
-          "glass" : false,
-          "image-name" : "index-lines.svg",
-          "name" : "index-lines",
-          "position" : {
-            "scale" : 1,
-            "translation-in-points" : [
-              0,
-              0
-            ]
-          }
-        }
-      ],
-      "shadow" : {
-        "kind" : "neutral",
-        "opacity" : 0.08
-      },
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.28
+        "value" : 0.08
       }
     },
     {
@@ -93,11 +45,11 @@
       ],
       "shadow" : {
         "kind" : "neutral",
-        "opacity" : 0.18
+        "opacity" : 0.14
       },
       "translucency" : {
         "enabled" : true,
-        "value" : 0.18
+        "value" : 0.12
       }
     }
   ],
