@@ -1190,7 +1190,7 @@ final class SearchStore: ObservableObject {
         sortDirection = settings.sortDirection
         searchOptions = settings.searchOptions
         activeProfileID = settings.activeProfileID
-        globalHotkeyChoice = settings.globalHotkeyChoice ?? .optionSpace
+        globalHotkeyChoice = settings.globalHotkeyChoice ?? GlobalHotkeyChoice.recommended
         launchAtLogin = settings.launchAtLogin ?? false
         if let visibleColumns = settings.visibleColumns, !visibleColumns.isEmpty {
             self.visibleColumns = visibleColumns

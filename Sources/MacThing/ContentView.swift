@@ -309,7 +309,16 @@ private struct MoreMenu: View {
                         Button {
                             store.indexVolume(profile)
                         } label: {
-                            Text(profile.displayName)
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack {
+                                    Text(profile.displayName)
+                                    Text(profile.locationDescription)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(profile.path)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
@@ -381,19 +390,8 @@ private struct MoreMenu: View {
                 }
             }
 
-            Menu("Global Hotkey") {
-                ForEach(GlobalHotkeyChoice.allCases) { choice in
-                    Button {
-                        store.setGlobalHotkeyChoice(choice)
-                    } label: {
-                        HStack {
-                            Text(choice.displayName)
-                            if store.globalHotkeyChoice == choice {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                }
+            Menu("Global Hotkey: \(store.globalHotkeyChoice.displayName)") {
+                GlobalHotkeyMenuContent()
             }
 
             Menu("Diagnostics") {
@@ -642,6 +640,25 @@ private struct IndexExclusionMenuContent: View {
             Label("Clear Exclusions", systemImage: "trash")
         }
         .disabled(!store.activeIndexExclusionRules.hasCustomRules)
+    }
+}
+
+private struct GlobalHotkeyMenuContent: View {
+    @EnvironmentObject private var store: SearchStore
+
+    var body: some View {
+        ForEach(GlobalHotkeyChoice.allCases) { choice in
+            Button {
+                store.setGlobalHotkeyChoice(choice)
+            } label: {
+                HStack {
+                    Text(choice.displayName)
+                    if store.globalHotkeyChoice == choice {
+                        Image(systemName: "checkmark")
+                    }
+                }
+            }
+        }
     }
 }
 

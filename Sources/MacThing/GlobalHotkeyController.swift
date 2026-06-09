@@ -6,9 +6,19 @@ enum GlobalHotkeyChoice: String, Codable, CaseIterable, Identifiable, Sendable {
     case optionSpace
     case controlOptionSpace
     case commandOptionSpace
+    case controlCommandSpace
+    case optionF
+    case controlOptionF
+    case commandOptionF
+    case commandShiftF
+    case f13
     case disabled
 
     var id: String { rawValue }
+
+    static var recommended: GlobalHotkeyChoice {
+        .optionSpace
+    }
 
     var displayName: String {
         switch self {
@@ -18,6 +28,18 @@ enum GlobalHotkeyChoice: String, Codable, CaseIterable, Identifiable, Sendable {
             return "Control Option Space"
         case .commandOptionSpace:
             return "Command Option Space"
+        case .controlCommandSpace:
+            return "Control Command Space"
+        case .optionF:
+            return "Option F"
+        case .controlOptionF:
+            return "Control Option F"
+        case .commandOptionF:
+            return "Command Option F"
+        case .commandShiftF:
+            return "Command Shift F"
+        case .f13:
+            return "F13"
         case .disabled:
             return "Disabled"
         }
@@ -25,8 +47,12 @@ enum GlobalHotkeyChoice: String, Codable, CaseIterable, Identifiable, Sendable {
 
     fileprivate var keyCode: UInt32? {
         switch self {
-        case .optionSpace, .controlOptionSpace, .commandOptionSpace:
+        case .optionSpace, .controlOptionSpace, .commandOptionSpace, .controlCommandSpace:
             return UInt32(kVK_Space)
+        case .optionF, .controlOptionF, .commandOptionF, .commandShiftF:
+            return UInt32(kVK_ANSI_F)
+        case .f13:
+            return UInt32(kVK_F13)
         case .disabled:
             return nil
         }
@@ -40,6 +66,18 @@ enum GlobalHotkeyChoice: String, Codable, CaseIterable, Identifiable, Sendable {
             return UInt32(controlKey | optionKey)
         case .commandOptionSpace:
             return UInt32(cmdKey | optionKey)
+        case .controlCommandSpace:
+            return UInt32(controlKey | cmdKey)
+        case .optionF:
+            return UInt32(optionKey)
+        case .controlOptionF:
+            return UInt32(controlKey | optionKey)
+        case .commandOptionF:
+            return UInt32(cmdKey | optionKey)
+        case .commandShiftF:
+            return UInt32(cmdKey | shiftKey)
+        case .f13:
+            return 0
         case .disabled:
             return 0
         }

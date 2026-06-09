@@ -33,6 +33,19 @@ public struct VolumeProfile: Codable, Hashable, Identifiable, Sendable {
     public var displayName: String {
         name.isEmpty ? path : name
     }
+
+    public var locationDescription: String {
+        if !isLocal {
+            return "Network"
+        }
+        if isRemovable {
+            return "Removable"
+        }
+        if isInternal {
+            return "Internal"
+        }
+        return "Local"
+    }
 }
 
 public enum VolumeProfileProvider {

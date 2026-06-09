@@ -154,6 +154,10 @@ search.
 - Filter bar for all, files, folders, images, audio, video, and documents.
 - Mounted volume menu can refresh and index a selected local or external volume
   root.
+- Mounted network volumes exposed by macOS under `/Volumes` can be indexed from
+  the same volume menu. Initial scans work like local volumes, while live change
+  detection depends on the network file system/server and may need manual
+  reindexing when stale.
 - Index profile menu can add the current root, switch between saved roots, and
   remove inactive profiles.
 - Multiple enabled index profiles are searched together, so separate roots or

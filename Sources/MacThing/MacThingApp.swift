@@ -65,7 +65,7 @@ struct MacThingApp: App {
                 }
             }
 
-            Menu("Hotkey") {
+            Menu("Hotkey: \(store.globalHotkeyChoice.displayName)") {
                 ForEach(GlobalHotkeyChoice.allCases) { choice in
                     Button {
                         store.setGlobalHotkeyChoice(choice)
