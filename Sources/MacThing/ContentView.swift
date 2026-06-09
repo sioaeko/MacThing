@@ -309,18 +309,11 @@ private struct MoreMenu: View {
                         Button {
                             store.indexVolume(profile)
                         } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack {
-                                    Text(profile.displayName)
-                                    Text(profile.locationDescription)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Text(profile.path)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                            Text(profile.menuTitle)
                         }
                     }
+                } else {
+                    Text("No mounted volumes")
                 }
             }
 

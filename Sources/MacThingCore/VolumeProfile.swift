@@ -46,6 +46,10 @@ public struct VolumeProfile: Codable, Hashable, Identifiable, Sendable {
         }
         return "Local"
     }
+
+    public var menuTitle: String {
+        "\(displayName) (\(locationDescription)) - \(path)"
+    }
 }
 
 public enum VolumeProfileProvider {
