@@ -1588,7 +1588,7 @@ final class SearchStore: ObservableObject {
         let monitor = FileSystemMonitor(
             rootURL: URL(fileURLWithPath: profile.rootPath),
             excludedPathPrefixes: effectiveExcludedPathPrefixes(for: profile),
-            sinceEventID: profile.lastFSEventID,
+            sinceEventID: nil,
             onChange: { [weak self, profileID = profile.id] changes, latestEventID in
                 Task { @MainActor in
                     self?.handleFileSystemChanges(

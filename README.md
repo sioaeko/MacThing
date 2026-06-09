@@ -163,8 +163,9 @@ search.
   flags, apply changed-path subtree updates to the matching profile database,
   scan parent folders for rename/remove events, and fall back to profile-scoped
   full refreshes for dropped or broad changes.
-- Index profiles persist the last seen FSEvents event ID so monitoring can
-  resume across launches and force a refresh when macOS reports an event gap.
+- Index profiles track the last seen FSEvents event ID while running, but app
+  launch resumes monitoring from the current event stream so old backlog does
+  not trigger a full refresh on every start.
 - Diagnostics menu checks common protected locations and opens Full Disk Access
   settings when indexing appears incomplete.
 - Run count is updated when opening a result.
