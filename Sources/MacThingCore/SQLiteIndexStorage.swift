@@ -259,6 +259,9 @@ private final class SQLiteDatabase {
                 hint: hint,
                 limit: safeLimit
             ))
+            if candidates.count >= min(safeLimit, 1_000) {
+                return uniqueEntries(candidates)
+            }
         }
 
         candidates.append(contentsOf: try likeCandidateEntries(hint: hint, limit: safeLimit))
@@ -533,7 +536,8 @@ private final class SQLiteDatabase {
 
     private func ftsMatchQuery(for terms: [String]) -> String? {
         let tokens = terms.flatMap(ftsTokens)
-        guard !tokens.isEmpty else {
+        guard !tokens.isEmpty,
+              tokens.allSatisfy({ $0.count >= 2 }) else {
             return nil
         }
         return tokens.map { "\($0)*" }.joined(separator: " AND ")

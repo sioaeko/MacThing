@@ -182,6 +182,8 @@ private final class QueryServiceState: @unchecked Sendable {
     private struct Snapshot {
         var rootPath = ""
         var entries: [FileEntry] = []
+        var indexURLs: [URL] = []
+        var fileListEntries: [FileEntry] = []
         var resultCount = 0
         var lastIndexedAt: Date?
         var sortField: SearchSortField = .relevance
@@ -195,6 +197,8 @@ private final class QueryServiceState: @unchecked Sendable {
     func update(
         rootPath: String,
         entries: [FileEntry],
+        indexURLs: [URL],
+        fileListEntries: [FileEntry],
         resultCount: Int,
         lastIndexedAt: Date?,
         sortField: SearchSortField,
@@ -205,6 +209,8 @@ private final class QueryServiceState: @unchecked Sendable {
         snapshot = Snapshot(
             rootPath: rootPath,
             entries: entries,
+            indexURLs: indexURLs,
+            fileListEntries: fileListEntries,
             resultCount: resultCount,
             lastIndexedAt: lastIndexedAt,
             sortField: sortField,
@@ -231,6 +237,15 @@ private final class QueryServiceState: @unchecked Sendable {
         lock.lock()
         let current = snapshot
         lock.unlock()
+
+        if let databaseResponse = SearchStore.databaseBackedSearch(
+            request: request,
+            entries: current.entries,
+            indexURLs: current.indexURLs,
+            activeFileListEntries: current.fileListEntries
+        ) {
+            return databaseResponse
+        }
 
         return SearchEngine.search(request: request, in: current.entries)
     }
@@ -391,11 +406,26 @@ final class SearchStore: ObservableObject {
     }
 
     private func runtimeExcludedPathPrefixes(forProfileID profileID: String?) -> [String] {
-        guard let profileID,
-              let indexURL = try? IndexStorage.profileIndexURL(profileID: profileID) else {
-            return []
+        var excludedPaths = Self.applicationRuntimeExcludedPathPrefixes()
+        if let profileID,
+           let indexURL = try? IndexStorage.profileIndexURL(profileID: profileID) {
+            excludedPaths.append(indexURL.deletingLastPathComponent().path)
         }
-        return [indexURL.deletingLastPathComponent().path]
+        return IndexExclusionRules(excludedPathPrefixes: excludedPaths).excludedPathPrefixes
+    }
+
+    private nonisolated static func applicationRuntimeExcludedPathPrefixes() -> [String] {
+        var paths: [String] = []
+        if let supportDirectory = try? IndexStorage.applicationSupportDirectory() {
+            paths.append(supportDirectory.path)
+        }
+
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        paths.append(home.appending(path: "Library/Preferences/com.shibuki.MacThing.plist").path)
+        paths.append(home.appending(path: "Library/Preferences/MacThing.plist").path)
+        paths.append(home.appending(path: "Library/Caches/com.shibuki.MacThing").path)
+        paths.append(home.appending(path: "Library/Saved Application State/com.shibuki.MacThing.savedState").path)
+        return paths
     }
 
     private func effectiveExcludedPathPrefixes(for profile: IndexProfile) -> [String] {
@@ -1922,31 +1952,13 @@ final class SearchStore: ObservableObject {
                     options: searchOptions
                 )
 
-                if entries.count > 25_000,
-                   activeFileListEntries.isEmpty,
-                   let windowEntries = try? Self.databaseWindowEntries(
+                if let databaseResponse = Self.databaseBackedSearch(
                     request: request,
-                    indexURLs: indexURLs
-                   ),
-                   !windowEntries.isEmpty {
-                    let windowResponse = SearchEngine.search(request: request, in: windowEntries)
-                    return SearchResponse(
-                        entries: windowResponse.entries,
-                        totalMatches: entries.count,
-                        warnings: windowResponse.warnings
-                    )
-                }
-
-                if entries.count > 25_000,
-                   let candidateEntries = try? Self.databaseCandidateEntries(
-                    request: request,
-                    indexURLs: indexURLs
-                   ),
-                   !candidateEntries.isEmpty {
-                    return SearchEngine.search(
-                        request: request,
-                        in: Self.mergeCandidateEntries(candidateEntries, activeFileListEntries)
-                    )
+                    entries: entries,
+                    indexURLs: indexURLs,
+                    activeFileListEntries: activeFileListEntries
+                ) {
+                    return databaseResponse
                 }
 
                 return SearchEngine.search(
@@ -2001,6 +2013,10 @@ final class SearchStore: ObservableObject {
         queryServiceState.update(
             rootPath: rootPath,
             entries: entries,
+            indexURLs: enabledProfileIndexURLs,
+            fileListEntries: fileListSources
+                .filter(\.isEnabled)
+                .flatMap(\.entriesWithSourceMetadata),
             resultCount: results.count,
             lastIndexedAt: lastIndexedAt,
             sortField: sortField,
@@ -2021,6 +2037,43 @@ final class SearchStore: ObservableObject {
         return "\(filterPrefix) \(trimmedUserQuery)"
     }
 
+    fileprivate nonisolated static func databaseBackedSearch(
+        request: SearchRequest,
+        entries: [FileEntry],
+        indexURLs: [URL],
+        activeFileListEntries: [FileEntry]
+    ) -> SearchResponse? {
+        guard entries.count > 25_000 else {
+            return nil
+        }
+
+        if activeFileListEntries.isEmpty,
+           let windowEntries = try? databaseWindowEntries(
+            request: request,
+            indexURLs: indexURLs
+           ),
+           !windowEntries.isEmpty {
+            let windowResponse = SearchEngine.searchCandidateSubset(request: request, in: windowEntries)
+            return SearchResponse(
+                entries: windowResponse.entries,
+                totalMatches: entries.count,
+                warnings: windowResponse.warnings
+            )
+        }
+
+        if let candidateEntries = try? databaseCandidateEntries(
+            request: request,
+            indexURLs: indexURLs
+        ) {
+            return SearchEngine.searchCandidateSubset(
+                request: request,
+                in: mergeCandidateEntries(candidateEntries, activeFileListEntries)
+            )
+        }
+
+        return nil
+    }
+
     private nonisolated static func databaseCandidateEntries(
         request: SearchRequest,
         indexURLs: [URL]
@@ -2035,8 +2088,15 @@ final class SearchStore: ObservableObject {
         }
 
         var candidatesByPath: [String: FileEntry] = [:]
-        let requestedWindowEnd = request.offset + request.limit
-        let perIndexLimit = max(requestedWindowEnd * 40, 2_000)
+        let requestedWindowEnd = max(request.offset + request.limit, request.limit)
+        let shortestTermLength = hint.terms.map(\.count).min() ?? Int.max
+        let candidateMultiplier = shortestTermLength <= 2 ? 8 : 16
+        let candidateFloor = shortestTermLength <= 2 ? 1_000 : 2_000
+        let candidateCeiling = shortestTermLength <= 2 ? 5_000 : 12_000
+        let perIndexLimit = min(
+            max(requestedWindowEnd * candidateMultiplier, candidateFloor),
+            candidateCeiling
+        )
         for indexURL in indexURLs {
             let candidates = try IndexStorage.candidateEntries(
                 hint: hint,

@@ -570,9 +570,22 @@ public enum SearchEngine {
         in entries: [FileEntry],
         shouldCancel: @Sendable () -> Bool
     ) -> SearchResponse {
+        search(request: request, in: entries, shouldCancel: shouldCancel, buildFullContext: true)
+    }
+
+    public static func searchCandidateSubset(request: SearchRequest, in entries: [FileEntry]) -> SearchResponse {
+        search(request: request, in: entries, shouldCancel: { false }, buildFullContext: false)
+    }
+
+    private static func search(
+        request: SearchRequest,
+        in entries: [FileEntry],
+        shouldCancel: @Sendable () -> Bool,
+        buildFullContext: Bool
+    ) -> SearchResponse {
         let parsed = SearchQueryParser.parse(request.query)
         let effectiveRequest = applyingQueryOverrides(request, parsed)
-        let context = SearchContext(entries: entries, options: request.options)
+        let context = SearchContext(entries: entries, options: request.options, buildFullIndexes: buildFullContext)
 
         guard !parsed.isEmpty else {
             if shouldCancel() {
@@ -1566,7 +1579,27 @@ private struct SearchContext {
     let entriesByPath: [String: FileEntry]
     let fileSystemIndexBySourceKey: [String: Int]
 
-    init(entries: [FileEntry], options: SearchOptions) {
+    init(entries: [FileEntry], options: SearchOptions, buildFullIndexes: Bool = true) {
+        guard buildFullIndexes else {
+            self.entries = entries
+            normalizedNameCounts = [:]
+            normalizedNamePartCounts = [:]
+            normalizedExtensionCounts = [:]
+            normalizedPathPartCounts = [:]
+            byteSizeCounts = [:]
+            createdAtCounts = [:]
+            modifiedAtCounts = [:]
+            accessedAtCounts = [:]
+            attributeCounts = [:]
+            childCountsByParentPath = [:]
+            childFileCountsByParentPath = [:]
+            childFolderCountsByParentPath = [:]
+            childrenByParentPath = [:]
+            entriesByPath = [:]
+            fileSystemIndexBySourceKey = [:]
+            return
+        }
+
         var nameCounts: [String: Int] = [:]
         var namePartCounts: [String: Int] = [:]
         var extensionCounts: [String: Int] = [:]
