@@ -562,11 +562,22 @@ public enum SearchEngine {
     }
 
     public static func search(request: SearchRequest, in entries: [FileEntry]) -> SearchResponse {
+        search(request: request, in: entries, shouldCancel: { false })
+    }
+
+    public static func search(
+        request: SearchRequest,
+        in entries: [FileEntry],
+        shouldCancel: @Sendable () -> Bool
+    ) -> SearchResponse {
         let parsed = SearchQueryParser.parse(request.query)
         let effectiveRequest = applyingQueryOverrides(request, parsed)
         let context = SearchContext(entries: entries, options: request.options)
 
         guard !parsed.isEmpty else {
+            if shouldCancel() {
+                return SearchResponse(entries: [], totalMatches: 0, warnings: parsed.warnings)
+            }
             let sorted = sort(
                 matches: entries.map { SearchMatch(score: 0, entry: $0) },
                 field: effectiveRequest.sortField == .relevance ? .dateModified : effectiveRequest.sortField,
@@ -585,7 +596,10 @@ public enum SearchEngine {
             max(effectiveRequest.limit + effectiveRequest.offset, effectiveRequest.limit) * 4
         ))
 
-        for entry in entries {
+        for (index, entry) in entries.enumerated() {
+            if index.isMultiple(of: 1_024), shouldCancel() {
+                return SearchResponse(entries: [], totalMatches: 0, warnings: parsed.warnings)
+            }
             if let score = parsed.score(entry: entry, options: request.options, context: context) {
                 matches.append(SearchMatch(score: score, entry: entry))
             }
@@ -650,7 +664,7 @@ public enum SearchEngine {
 
         func addTerm(_ value: String) {
             let restoredValue = unescapeQuotedListSeparators(value)
-            if restoredValue.count >= 3 {
+            if !restoredValue.isEmpty {
                 terms.append(restoredValue)
             }
         }
@@ -824,7 +838,7 @@ public enum SearchEngine {
                      "pathname", "parsefullpath", "parsefilename", "parsepathandname",
                      "parsepathname", "pathpart", "pathparts", "pp", "location",
                      "stem", "namepart":
-                    if value.count >= 3 {
+                    if !value.isEmpty {
                         terms.append(value)
                     }
                 case "parent", "infolder", "nosubfolders", "parentpath", "parentfullpath":
@@ -881,11 +895,11 @@ public enum SearchEngine {
                     }
                     numericFilters.append(contentsOf: filter.candidateFilters(field: .runCount))
                 case "startwith", "startswith", "beginwith", "beginswith", "begin":
-                    if value.count >= 3 {
+                    if !value.isEmpty {
                         terms.append(value)
                     }
                 case "endwith", "endswith", "end":
-                    if value.count >= 3 {
+                    if !value.isEmpty {
                         terms.append(value)
                     }
                 case "type", "kind", "category":
@@ -1041,7 +1055,7 @@ public enum SearchEngine {
                 default:
                     continue
                 }
-            } else if token.count >= 3 {
+            } else if !token.isEmpty {
                 terms.append(token)
             }
         }

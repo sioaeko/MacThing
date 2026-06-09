@@ -60,6 +60,16 @@ public enum SQLiteIndexStorage {
         try database.createSchema()
         return try database.candidateEntries(hint: hint, limit: limit)
     }
+
+    public static func windowEntries(
+        limit: Int,
+        offset: Int,
+        from url: URL
+    ) throws -> [FileEntry] {
+        let database = try SQLiteDatabase(url: url)
+        try database.createSchema()
+        return try database.windowEntries(limit: limit, offset: offset)
+    }
 }
 
 private final class SQLiteDatabase {
@@ -253,6 +263,24 @@ private final class SQLiteDatabase {
 
         candidates.append(contentsOf: try likeCandidateEntries(hint: hint, limit: safeLimit))
         return uniqueEntries(candidates)
+    }
+
+    func windowEntries(limit: Int, offset: Int) throws -> [FileEntry] {
+        let safeLimit = max(1, min(limit, 5_000))
+        let safeOffset = max(0, offset)
+        let sql = """
+            SELECT path, name, parent, kind, byte_size, created_at, modified_at,
+                   accessed_at, indexed_at, run_count, last_run_at, attributes,
+                   file_id, volume_id, media_title, media_artist, media_album,
+                   media_comment, media_genre, media_track, media_year
+            FROM entries
+            ORDER BY modified_at DESC, name ASC
+            LIMIT \(safeLimit) OFFSET \(safeOffset);
+            """
+
+        return try query(sql) { statement in
+            self.entry(from: statement)
+        }
     }
 
     private func ftsCandidateEntries(

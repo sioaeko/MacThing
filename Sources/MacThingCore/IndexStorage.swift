@@ -69,4 +69,8 @@ public enum IndexStorage {
     public static func candidateEntries(hint: SearchCandidateHint, limit: Int, from url: URL) throws -> [FileEntry] {
         try SQLiteIndexStorage.candidateEntries(hint: hint, limit: limit, from: url)
     }
+
+    public static func windowEntries(limit: Int, offset: Int, from url: URL) throws -> [FileEntry] {
+        try SQLiteIndexStorage.windowEntries(limit: limit, offset: offset, from: url)
+    }
 }

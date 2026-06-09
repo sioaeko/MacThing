@@ -1911,9 +1911,9 @@ final class SearchStore: ObservableObject {
             .filter(\.isEnabled)
             .flatMap(\.entriesWithSourceMetadata)
         searchTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(45))
+            try? await Task.sleep(for: .milliseconds(120))
 
-            let response = await Task.detached(priority: .userInitiated) {
+            let worker = Task.detached(priority: .userInitiated) {
                 let effectiveQuery = Self.effectiveQuery(userQuery: query, filter: activeFilter)
                 let request = SearchRequest(
                     query: effectiveQuery,
@@ -1921,6 +1921,21 @@ final class SearchStore: ObservableObject {
                     sortDirection: sortDirection,
                     options: searchOptions
                 )
+
+                if entries.count > 25_000,
+                   activeFileListEntries.isEmpty,
+                   let windowEntries = try? Self.databaseWindowEntries(
+                    request: request,
+                    indexURLs: indexURLs
+                   ),
+                   !windowEntries.isEmpty {
+                    let windowResponse = SearchEngine.search(request: request, in: windowEntries)
+                    return SearchResponse(
+                        entries: windowResponse.entries,
+                        totalMatches: entries.count,
+                        warnings: windowResponse.warnings
+                    )
+                }
 
                 if entries.count > 25_000,
                    let candidateEntries = try? Self.databaseCandidateEntries(
@@ -1934,8 +1949,17 @@ final class SearchStore: ObservableObject {
                     )
                 }
 
-                return SearchEngine.search(request: request, in: entries)
-            }.value
+                return SearchEngine.search(
+                    request: request,
+                    in: entries,
+                    shouldCancel: { Task.isCancelled }
+                )
+            }
+            let response = await withTaskCancellationHandler {
+                await worker.value
+            } onCancel: {
+                worker.cancel()
+            }
 
             guard let self, !Task.isCancelled else {
                 return
@@ -2017,6 +2041,33 @@ final class SearchStore: ObservableObject {
             let candidates = try IndexStorage.candidateEntries(
                 hint: hint,
                 limit: perIndexLimit,
+                from: indexURL
+            )
+            for candidate in candidates {
+                candidatesByPath[candidate.path] = candidate
+            }
+        }
+
+        return Array(candidatesByPath.values)
+    }
+
+    private nonisolated static func databaseWindowEntries(
+        request: SearchRequest,
+        indexURLs: [URL]
+    ) throws -> [FileEntry]? {
+        guard !indexURLs.isEmpty,
+              request.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              request.offset == 0,
+              request.sortField == .relevance ||
+                (request.sortField == .dateModified && request.sortDirection == .descending) else {
+            return nil
+        }
+
+        var candidatesByPath: [String: FileEntry] = [:]
+        for indexURL in indexURLs {
+            let candidates = try IndexStorage.windowEntries(
+                limit: request.limit,
+                offset: request.offset,
                 from: indexURL
             )
             for candidate in candidates {
