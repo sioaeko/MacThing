@@ -16,8 +16,7 @@
       <stop offset="1" stop-color="#E8B858" stop-opacity="0"/>
     </radialGradient>
   </defs>
-  <rect x="70" y="70" width="884" height="884" rx="204" fill="url(#base)"/>
-  <rect x="70" y="70" width="884" height="884" rx="204" fill="url(#glowTop)"/>
-  <rect x="70" y="70" width="884" height="884" rx="204" fill="url(#glowBottom)"/>
-  <rect x="108" y="108" width="808" height="808" rx="172" fill="none" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="12"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="236" fill="url(#base)"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="236" fill="url(#glowTop)"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="236" fill="url(#glowBottom)"/>
 </svg>
