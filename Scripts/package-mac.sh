@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="${APP_NAME:-MacThing}"
 BUNDLE_ID="${BUNDLE_ID:-com.shibuki.MacThing}"
-VERSION="${VERSION:-0.1.2}"
+VERSION="${VERSION:-0.1.3}"
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
 CONFIGURATION="${CONFIGURATION:-release}"
 

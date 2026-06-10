@@ -16,7 +16,7 @@ search.
 
 The current packaged release is available from GitHub:
 
-- [MacThing 0.1.2 DMG](https://github.com/sioaeko/MacThing/releases/download/v0.1.2/MacThing-0.1.2.dmg)
+- [MacThing 0.1.3 DMG](https://github.com/sioaeko/MacThing/releases/download/v0.1.3/MacThing-0.1.3.dmg)
 
 ## Everything-Like Behavior Implemented
 
@@ -256,7 +256,7 @@ ICTOOL="/Applications/Icon Composer.app/Contents/Executables/ictool" Scripts/pac
 The packaged outputs are written to:
 
 - `dist/MacThing.app`
-- `dist/MacThing-0.1.2.dmg`
+- `dist/MacThing-0.1.3.dmg`
 
 Override release metadata when needed:
 

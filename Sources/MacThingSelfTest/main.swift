@@ -4370,6 +4370,17 @@ do {
         noisyChangedEntries.isEmpty,
         "scanChangedPath should skip default developer noise directories"
     )
+    let noisyChildChangedEntries = FileScanner.scanChangedPath(
+        path: temporaryDirectory
+            .appending(path: ".git", directoryHint: .isDirectory)
+            .appending(path: "Generated.txt")
+            .path,
+        existingEntriesByPath: [:]
+    )
+    expect(
+        noisyChildChangedEntries.isEmpty,
+        "scanChangedPath should skip changes below default developer noise directories"
+    )
 
     let identityFile = temporaryDirectory.appending(path: "Identity.txt")
     let renamedIdentityFile = temporaryDirectory.appending(path: "Identity Renamed.txt")

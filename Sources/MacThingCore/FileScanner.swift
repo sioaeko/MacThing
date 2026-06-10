@@ -172,6 +172,7 @@ public enum FileScanner {
             excludedExtensions: excludedExtensions
         )
         guard !isExcludedByPath(url: url, prefixes: configuration.excludedPathPrefixes),
+              !isUnderSkippedDirectory(url: url, configuration: configuration),
               FileManager.default.fileExists(atPath: url.path) else {
             return []
         }
@@ -436,6 +437,13 @@ public enum FileScanner {
                 resolvedPath == prefix ||
                 resolvedPath.hasPrefix(prefix + "/")
         }
+    }
+
+    private static func isUnderSkippedDirectory(url: URL, configuration: ScanConfiguration) -> Bool {
+        url
+            .standardizedFileURL
+            .pathComponents
+            .contains { configuration.skippedDirectoryNames.contains($0) }
     }
 
     private static func matchesAnyNamePattern(_ name: String, patterns: [String]) -> Bool {
