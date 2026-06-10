@@ -1,8 +1,13 @@
 <p align="center">
-  <img src="Assets/README/MacThing-icon.svg" width="104" alt="MacThing app icon">
+  <img src="Assets/README/MacThing-icon.svg" width="112" alt="MacThing app icon">
 </p>
 
-# MacThing
+<h1 align="center">MacThing</h1>
+
+<p align="center">
+  <strong>Everything-style file search, built natively for macOS.</strong><br>
+  Fast local indexing, SQLite-backed search, live folder updates, and a compact global search palette.
+</p>
 
 <p align="center">
   <img alt="Swift" src="https://img.shields.io/badge/Swift-native-F05138?logo=swift&logoColor=white">
@@ -13,18 +18,27 @@
   <img alt="Release" src="https://img.shields.io/github/v/release/sioaeko/MacThing?label=release&logo=github">
 </p>
 
-MacThing is a native macOS app for Everything-style file-name search. It
-indexes a chosen folder, keeps a path-keyed index in memory, persists it in a
-SQLite database, monitors file-system changes, and filters names and paths as
-you type.
+<p align="center">
+  <a href="https://github.com/sioaeko/MacThing/releases/download/v0.1.3/MacThing-0.1.3.dmg"><strong>Download DMG</strong></a>
+  ·
+  <a href="#run">Run from source</a>
+  ·
+  <a href="#everything-like-behavior-implemented">Feature list</a>
+</p>
 
 ## Demo
 
 <p align="center">
-  <video src="Assets/README/MacThing.mp4" controls width="960" aria-label="MacThing demo video"></video>
+  <img src="Assets/README/MacThing-demo.gif" width="960" alt="MacThing demo showing instant local file search on macOS">
 </p>
 
-[Watch the demo video](Assets/README/MacThing.mp4)
+<table>
+  <tr>
+    <td><strong>Instant search</strong><br>Type and filter local file names, paths, file lists, and indexed volumes.</td>
+    <td><strong>Native macOS</strong><br>SwiftUI windowing, AppKit integration, menu bar controls, and a global hotkey palette.</td>
+    <td><strong>Local-first index</strong><br>SQLite WAL + FTS5 candidates, profile-scoped databases, and FSEvents updates.</td>
+  </tr>
+</table>
 
 ## Why This Exists
 
