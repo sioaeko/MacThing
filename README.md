@@ -1,6 +1,6 @@
 # MacThing
 
-MacThing is a native macOS prototype for Everything-style file-name search. It
+MacThing is a native macOS app for Everything-style file-name search. It
 indexes a chosen folder, keeps a path-keyed index in memory, persists it in a
 SQLite database, monitors file-system changes, and filters names and paths as
 you type.
@@ -11,6 +11,12 @@ Everything itself is a Windows file-name search tool. macOS has Spotlight and a
 few third-party alternatives, but there is still room for a focused, lightweight
 tool that feels instant, stays local, and makes external or noisy folders easy to
 search.
+
+## Download
+
+The current packaged release is available from GitHub:
+
+- [MacThing 0.1.1 DMG](https://github.com/sioaeko/MacThing/releases/download/v0.1.1/MacThing-0.1.1.dmg)
 
 ## Everything-Like Behavior Implemented
 
@@ -249,7 +255,7 @@ ICTOOL="/Applications/Icon Composer.app/Contents/Executables/ictool" Scripts/pac
 The packaged outputs are written to:
 
 - `dist/MacThing.app`
-- `dist/MacThing-0.1.0.dmg`
+- `dist/MacThing-0.1.1.dmg`
 
 Override release metadata when needed:
 
