@@ -18,6 +18,14 @@ indexes a chosen folder, keeps a path-keyed index in memory, persists it in a
 SQLite database, monitors file-system changes, and filters names and paths as
 you type.
 
+## Demo
+
+<p align="center">
+  <video src="Assets/README/MacThing.mp4" controls width="960" aria-label="MacThing demo video"></video>
+</p>
+
+[Watch the demo video](Assets/README/MacThing.mp4)
+
 ## Why This Exists
 
 Everything itself is a Windows file-name search tool. macOS has Spotlight and a
