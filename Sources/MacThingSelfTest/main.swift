@@ -4335,6 +4335,23 @@ do {
         "scanner should exclude hidden files when the active profile disables them"
     )
 
+    let noisyDirectoryNames = [".git", ".build", "node_modules"]
+    for noisyDirectoryName in noisyDirectoryNames {
+        let noisyDirectory = temporaryDirectory.appending(path: noisyDirectoryName, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: noisyDirectory, withIntermediateDirectories: true)
+        try Data("noise".utf8).write(to: noisyDirectory.appending(path: "Generated.txt"))
+    }
+    let defaultNoiseScan = FileScanner.scan(
+        configuration: ScanConfiguration(rootURL: temporaryDirectory)
+    )
+    let defaultNoisePaths = defaultNoiseScan.map(\.path)
+    expect(
+        noisyDirectoryNames.allSatisfy { directoryName in
+            !defaultNoisePaths.contains { $0.contains("/\(directoryName)/") || $0.hasSuffix("/\(directoryName)") }
+        },
+        "scanner should skip default developer and dependency noise directories"
+    )
+
     let excludedChangedEntries = FileScanner.scanChangedPath(
         path: excludedByExtensionFile.path,
         existingEntriesByPath: [:],
@@ -4343,6 +4360,15 @@ do {
     expect(
         excludedChangedEntries.isEmpty,
         "scanChangedPath should apply the same profile exclusion rules as full scans"
+    )
+
+    let noisyChangedEntries = FileScanner.scanChangedPath(
+        path: temporaryDirectory.appending(path: ".build", directoryHint: .isDirectory).path,
+        existingEntriesByPath: [:]
+    )
+    expect(
+        noisyChangedEntries.isEmpty,
+        "scanChangedPath should skip default developer noise directories"
     )
 
     let identityFile = temporaryDirectory.appending(path: "Identity.txt")

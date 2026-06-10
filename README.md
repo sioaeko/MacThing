@@ -16,12 +16,13 @@ search.
 
 The current packaged release is available from GitHub:
 
-- [MacThing 0.1.1 DMG](https://github.com/sioaeko/MacThing/releases/download/v0.1.1/MacThing-0.1.1.dmg)
+- [MacThing 0.1.2 DMG](https://github.com/sioaeko/MacThing/releases/download/v0.1.2/MacThing-0.1.2.dmg)
 
 ## Everything-Like Behavior Implemented
 
 - Native SwiftUI app.
-- Recursive folder indexing with common cache/system noise skipped.
+- Recursive folder indexing with common cache, system, source-control, and
+  developer build noise skipped.
 - Profile-scoped index exclusion rules can skip hidden files, path prefixes,
   name wildcard patterns, and file extensions before entries reach memory or
   SQLite.
@@ -255,7 +256,7 @@ ICTOOL="/Applications/Icon Composer.app/Contents/Executables/ictool" Scripts/pac
 The packaged outputs are written to:
 
 - `dist/MacThing.app`
-- `dist/MacThing-0.1.1.dmg`
+- `dist/MacThing-0.1.2.dmg`
 
 Override release metadata when needed:
 

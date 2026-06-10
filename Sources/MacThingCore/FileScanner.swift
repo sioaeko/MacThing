@@ -51,7 +51,17 @@ public enum FileScanner {
         ".Spotlight-V100",
         ".TemporaryItems",
         ".fseventsd",
-        "Caches"
+        ".build",
+        ".dart_tool",
+        ".git",
+        ".gradle",
+        ".hg",
+        ".swiftpm",
+        ".svn",
+        "__pycache__",
+        "Caches",
+        "DerivedData",
+        "node_modules"
     ]
 
     private struct MediaMetadata {
