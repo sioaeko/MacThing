@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Assets/README/MacThing-icon.svg" width="112" alt="MacThing app icon">
+  <img src="Assets/README/MacThing-icon.png" width="112" alt="MacThing app icon">
 </p>
 
 <h1 align="center">MacThing</h1>
