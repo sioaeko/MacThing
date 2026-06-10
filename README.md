@@ -1,4 +1,17 @@
+<p align="center">
+  <img src="Assets/README/MacThing-icon.svg" width="104" alt="MacThing app icon">
+</p>
+
 # MacThing
+
+<p align="center">
+  <img alt="Swift" src="https://img.shields.io/badge/Swift-native-F05138?logo=swift&logoColor=white">
+  <img alt="macOS" src="https://img.shields.io/badge/macOS-14%2B-111111?logo=apple&logoColor=white">
+  <img alt="SwiftUI" src="https://img.shields.io/badge/UI-SwiftUI-0A84FF?logo=apple&logoColor=white">
+  <img alt="SQLite" src="https://img.shields.io/badge/Search-SQLite%20FTS5-003B57?logo=sqlite&logoColor=white">
+  <img alt="DMG" src="https://img.shields.io/badge/Package-DMG-34C759?logo=files&logoColor=white">
+  <img alt="Release" src="https://img.shields.io/github/v/release/sioaeko/MacThing?label=release&logo=github">
+</p>
 
 MacThing is a native macOS app for Everything-style file-name search. It
 indexes a chosen folder, keeps a path-keyed index in memory, persists it in a
@@ -17,6 +30,14 @@ search.
 The current packaged release is available from GitHub:
 
 - [MacThing 0.1.3 DMG](https://github.com/sioaeko/MacThing/releases/download/v0.1.3/MacThing-0.1.3.dmg)
+
+## Tech Stack
+
+- Swift Package Manager with native Swift, SwiftUI, and AppKit.
+- SQLite in WAL mode with FTS5 candidate seeding for large catalogs.
+- FSEvents-based incremental updates for enabled index profiles.
+- Apple Icon Composer source assets exported to `icns` during packaging.
+- Ad-hoc signed `.app` bundle distributed inside a compressed DMG.
 
 ## Everything-Like Behavior Implemented
 
