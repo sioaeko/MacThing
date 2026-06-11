@@ -192,6 +192,8 @@ private final class QueryServiceState: @unchecked Sendable {
         var fileListEntries: [FileEntry] = []
         var resultCount = 0
         var lastIndexedAt: Date?
+        var statusText = ""
+        var isIndexing = false
         var sortField: SearchSortField = .relevance
         var sortDirection: SearchSortDirection = .ascending
         var options = SearchOptions()
@@ -207,6 +209,8 @@ private final class QueryServiceState: @unchecked Sendable {
         fileListEntries: [FileEntry],
         resultCount: Int,
         lastIndexedAt: Date?,
+        statusText: String,
+        isIndexing: Bool,
         sortField: SearchSortField,
         sortDirection: SearchSortDirection,
         options: SearchOptions
@@ -219,6 +223,8 @@ private final class QueryServiceState: @unchecked Sendable {
             fileListEntries: fileListEntries,
             resultCount: resultCount,
             lastIndexedAt: lastIndexedAt,
+            statusText: statusText,
+            isIndexing: isIndexing,
             sortField: sortField,
             sortDirection: sortDirection,
             options: options
@@ -235,7 +241,9 @@ private final class QueryServiceState: @unchecked Sendable {
             rootPath: current.rootPath,
             indexedCount: current.entries.count,
             resultCount: current.resultCount,
-            lastIndexedAt: current.lastIndexedAt
+            lastIndexedAt: current.lastIndexedAt,
+            statusText: current.statusText,
+            isIndexing: current.isIndexing
         )
     }
 
@@ -1553,6 +1561,7 @@ final class SearchStore: ObservableObject {
         let existingEntriesByPath = entriesByPath(forProfileID: profileID)
         isIndexing = true
         statusText = "Indexing \(profile.displayName)..."
+        updateQueryServiceState()
 
         indexTask = Task { [weak self] in
             let scannedEntries = await Task.detached(priority: .userInitiated) {
@@ -1640,6 +1649,7 @@ final class SearchStore: ObservableObject {
         results = []
         totalMatches = 0
         selectedPath = nil
+        updateQueryServiceState()
 
         let configuration = scanConfiguration(rootURL: rootURL)
         let existingEntriesByPath = fileIndex.snapshotByPath
@@ -1760,7 +1770,6 @@ final class SearchStore: ObservableObject {
         pendingFileSystemChangesByProfileID[profileID] = pendingChanges
 
         monitorReindexTasksByProfileID[profileID]?.cancel()
-        statusText = "Changes detected"
 
         monitorReindexTasksByProfileID[profileID] = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(900))
@@ -1839,6 +1848,8 @@ final class SearchStore: ObservableObject {
         }
 
         guard !removedPaths.isEmpty || !upsertedEntries.isEmpty else {
+            statusText = "\(entries.count.formatted()) items\(enabledProfileCount > 1 ? " across \(enabledProfileCount) profiles" : "")"
+            updateQueryServiceState()
             return
         }
 
@@ -2090,6 +2101,8 @@ final class SearchStore: ObservableObject {
                 .flatMap(\.entriesWithSourceMetadata),
             resultCount: results.count,
             lastIndexedAt: lastIndexedAt,
+            statusText: statusText,
+            isIndexing: isIndexing,
             sortField: sortField,
             sortDirection: sortDirection,
             options: searchOptions

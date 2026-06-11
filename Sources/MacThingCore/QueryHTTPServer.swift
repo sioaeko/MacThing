@@ -7,12 +7,23 @@ public final class QueryHTTPServer: @unchecked Sendable {
         public let indexedCount: Int
         public let resultCount: Int
         public let lastIndexedAt: Date?
+        public let statusText: String
+        public let isIndexing: Bool
 
-        public init(rootPath: String, indexedCount: Int, resultCount: Int, lastIndexedAt: Date?) {
+        public init(
+            rootPath: String,
+            indexedCount: Int,
+            resultCount: Int,
+            lastIndexedAt: Date?,
+            statusText: String = "",
+            isIndexing: Bool = false
+        ) {
             self.rootPath = rootPath
             self.indexedCount = indexedCount
             self.resultCount = resultCount
             self.lastIndexedAt = lastIndexedAt
+            self.statusText = statusText
+            self.isIndexing = isIndexing
         }
     }
 

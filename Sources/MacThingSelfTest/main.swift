@@ -4749,7 +4749,9 @@ do {
                 rootPath: "/Users/me",
                 indexedCount: 3,
                 resultCount: 0,
-                lastIndexedAt: nil
+                lastIndexedAt: nil,
+                statusText: "Ready",
+                isIndexing: false
             )
         }
     )
@@ -4760,12 +4762,16 @@ do {
     Thread.sleep(forTimeInterval: 0.1)
 
     let statusResponse = try httpGet(port: serverPort, path: "/api/status")
-    if !statusResponse.contains("\"indexedCount\":3") {
+    if !(statusResponse.contains("\"indexedCount\":3") &&
+        statusResponse.contains("\"statusText\":\"Ready\"") &&
+        statusResponse.contains("\"isIndexing\":false")) {
         fputs("HTTP status response was:\n\(statusResponse)\n", stderr)
     }
     expect(
-        statusResponse.contains("\"indexedCount\":3"),
-        "HTTP query service should return status JSON"
+        statusResponse.contains("\"indexedCount\":3") &&
+            statusResponse.contains("\"statusText\":\"Ready\"") &&
+            statusResponse.contains("\"isIndexing\":false"),
+        "HTTP query service should return status JSON with indexing state"
     )
 
     let searchResponse = try httpGet(port: serverPort, path: "/api/search?q=launch&limit=2")
