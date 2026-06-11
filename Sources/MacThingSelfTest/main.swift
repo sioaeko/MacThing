@@ -19,7 +19,25 @@ func canonicalPath(_ path: String) -> String {
     return path
 }
 
-func httpGet(port: UInt16, path: String) throws -> String {
+final class HTTPResultBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: Result<String, Error>?
+
+    func set(_ result: Result<String, Error>) {
+        lock.lock()
+        storage = result
+        lock.unlock()
+    }
+
+    func get() -> Result<String, Error>? {
+        lock.lock()
+        let result = storage
+        lock.unlock()
+        return result
+    }
+}
+
+func httpGet(port: UInt16, path: String, timeoutSeconds: Int = 5) throws -> String {
     let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
     guard fd >= 0 else {
         throw NSError(domain: "MacThingSelfTest", code: 1)
@@ -28,7 +46,7 @@ func httpGet(port: UInt16, path: String) throws -> String {
         Darwin.close(fd)
     }
 
-    var timeout = timeval(tv_sec: 5, tv_usec: 0)
+    var timeout = timeval(tv_sec: timeoutSeconds, tv_usec: 0)
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
 
     var address = sockaddr_in()
@@ -4935,6 +4953,84 @@ do {
     )
 } catch {
     fputs("Self-test failed: HTTP query service threw \(error)\n", stderr)
+    exit(1)
+}
+
+do {
+    let serverPort: UInt16 = 18246
+    let searchStarted = DispatchSemaphore(value: 0)
+    let releaseSearch = DispatchSemaphore(value: 0)
+    let searchFinished = DispatchSemaphore(value: 0)
+    let searchResult = HTTPResultBox()
+
+    let server = try QueryHTTPServer(
+        port: serverPort,
+        searchHandler: { _ in
+            searchStarted.signal()
+            _ = releaseSearch.wait(timeout: .now() + 2)
+            return SearchResponse(entries: [], totalMatches: 0)
+        },
+        statusHandler: {
+            QueryHTTPServer.Status(
+                rootPath: "/Users/me",
+                indexedCount: 3,
+                resultCount: 0,
+                lastIndexedAt: nil,
+                statusText: "Ready",
+                isIndexing: false
+            )
+        }
+    )
+    defer {
+        server.stop()
+    }
+
+    Thread.sleep(forTimeInterval: 0.1)
+
+    DispatchQueue.global(qos: .userInitiated).async {
+        do {
+            searchResult.set(.success(try httpGet(
+                port: serverPort,
+                path: "/api/search?q=slow&limit=1",
+                timeoutSeconds: 3
+            )))
+        } catch {
+            searchResult.set(.failure(error))
+        }
+        searchFinished.signal()
+    }
+
+    expect(
+        searchStarted.wait(timeout: .now() + 1) == .success,
+        "HTTP query service should start search requests"
+    )
+
+    let statusResponse = try httpGet(port: serverPort, path: "/api/status", timeoutSeconds: 1)
+    expect(
+        statusResponse.contains("\"indexedCount\":3") &&
+            statusResponse.contains("\"statusText\":\"Ready\""),
+        "HTTP query service should answer status while a search request is still running"
+    )
+
+    releaseSearch.signal()
+    expect(
+        searchFinished.wait(timeout: .now() + 2) == .success,
+        "HTTP query service should finish concurrent search requests"
+    )
+    switch searchResult.get() {
+    case let .success(response):
+        expect(
+            response.contains("\"totalMatches\":0"),
+            "HTTP query service should return completed concurrent search JSON"
+        )
+    case let .failure(error):
+        fputs("Concurrent HTTP search failed: \(error)\n", stderr)
+        expect(false, "HTTP query service should not fail concurrent search requests")
+    case .none:
+        expect(false, "HTTP query service should capture concurrent search results")
+    }
+} catch {
+    fputs("Self-test failed: HTTP query service concurrency threw \(error)\n", stderr)
     exit(1)
 }
 

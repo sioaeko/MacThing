@@ -64,6 +64,11 @@ public final class QueryHTTPServer: @unchecked Sendable {
     private var socketFD: Int32 = -1
     private var isRunning = false
     private let queue = DispatchQueue(label: "MacThing.QueryHTTPServer", qos: .utility)
+    private let clientQueue = DispatchQueue(
+        label: "MacThing.QueryHTTPServer.clients",
+        qos: .userInitiated,
+        attributes: .concurrent
+    )
 
     public init(
         port: UInt16,
@@ -129,7 +134,9 @@ public final class QueryHTTPServer: @unchecked Sendable {
             if clientFD < 0 {
                 continue
             }
-            receiveRequest(from: clientFD)
+            clientQueue.async { [self] in
+                receiveRequest(from: clientFD)
+            }
         }
     }
 
