@@ -90,6 +90,7 @@ public enum SQLiteIndexStorage {
 private final class SQLiteDatabase {
     private var db: OpaquePointer?
     private let derivedColumnsBackfillKey = "derivedColumnsBackfilledV2"
+    private let trigramBackfillKey = "trigramBackfilledV1"
 
     init(url: URL) throws {
         try FileManager.default.createDirectory(
@@ -175,7 +176,14 @@ private final class SQLiteDatabase {
                 parent
             );
             """)
+        try execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS entries_trigram USING fts5(
+                path,
+                tokenize='trigram'
+            );
+            """)
         try backfillDerivedColumnsIfNeeded()
+        try backfillTrigramIndexIfNeeded()
     }
 
     private func backfillDerivedColumnsIfNeeded() throws {
@@ -222,12 +230,40 @@ private final class SQLiteDatabase {
         }
     }
 
+    private func backfillTrigramIndexIfNeeded() throws {
+        let entryCount = try entryCount()
+        let trigramCount = try query("SELECT COUNT(*) FROM entries_trigram;") { statement in
+            statement.optionalInt(at: 0) ?? 0
+        }.first ?? 0
+        if try stringMetaValue(forKey: trigramBackfillKey) == "1",
+           entryCount == trigramCount {
+            return
+        }
+
+        let paths = try query("SELECT path FROM entries;") { statement in
+            statement.text(at: 0) ?? ""
+        }
+
+        try transaction {
+            try execute("DELETE FROM entries_trigram;")
+            try withStatement("INSERT INTO entries_trigram(path) VALUES (?);") { statement in
+                for path in paths where !path.isEmpty {
+                    try statement.reset()
+                    try statement.bind([.text(path)])
+                    try statement.stepDone()
+                }
+            }
+            try setMetaValue("1", forKey: trigramBackfillKey)
+        }
+    }
+
     func replace(_ snapshot: IndexSnapshot) throws {
         try transaction {
             try setMetaValue(snapshot.rootPath, forKey: "rootPath")
             try setMetaValue(String(snapshot.createdAt.timeIntervalSince1970), forKey: "updatedAt")
             try execute("DELETE FROM entries;")
             try execute("DELETE FROM entries_fts;")
+            try execute("DELETE FROM entries_trigram;")
             try insert(entries: snapshot.entries)
         }
     }
@@ -279,7 +315,15 @@ private final class SQLiteDatabase {
             }
         }
 
-        candidates.append(contentsOf: try likeCandidateEntries(hint: hint, limit: safeLimit))
+        if let trigramQuery = trigramMatchQuery(for: hint.terms) {
+            candidates.append(contentsOf: try trigramCandidateEntries(
+                matchQuery: trigramQuery,
+                hint: hint,
+                limit: safeLimit
+            ))
+        } else {
+            candidates.append(contentsOf: try likeCandidateEntries(hint: hint, limit: safeLimit))
+        }
         return uniqueEntries(candidates)
     }
 
@@ -346,6 +390,12 @@ private final class SQLiteDatabase {
                 try statement.bind(bindings)
                 try statement.stepDone()
             }
+            try withStatement(
+                "DELETE FROM entries_trigram WHERE path IN (SELECT path FROM entries WHERE \(condition));"
+            ) { statement in
+                try statement.bind(bindings)
+                try statement.stepDone()
+            }
             try withStatement("DELETE FROM entries WHERE \(condition);") { statement in
                 try statement.bind(bindings)
                 try statement.stepDone()
@@ -373,6 +423,34 @@ private final class SQLiteDatabase {
             JOIN entries ON entries.path = entries_fts.path
             WHERE entries_fts MATCH ?
             \(filterClause)
+            LIMIT \(limit);
+            """
+
+        return try query(sql, bindings: [.text(matchQuery)] + filter.bindings) { statement in
+            self.entry(from: statement)
+        }
+    }
+
+    private func trigramCandidateEntries(
+        matchQuery: String,
+        hint: SearchCandidateHint,
+        limit: Int
+    ) throws -> [FileEntry] {
+        let filter = candidateFilter(for: hint, tablePrefix: "entries")
+        let filterClause = filter.clause.map { " AND \($0)" } ?? ""
+        let sql = """
+            SELECT entries.path, entries.name, entries.parent, entries.kind, entries.byte_size,
+                   entries.created_at, entries.modified_at, entries.accessed_at,
+                   entries.indexed_at, entries.run_count, entries.last_run_at,
+                   entries.attributes, entries.file_id, entries.volume_id,
+                   entries.media_title, entries.media_artist, entries.media_album,
+                   entries.media_comment, entries.media_genre, entries.media_track,
+                   entries.media_year
+            FROM entries_trigram
+            JOIN entries ON entries.path = entries_trigram.path
+            WHERE entries_trigram MATCH ?
+            \(filterClause)
+            ORDER BY entries.modified_at DESC, entries.name ASC
             LIMIT \(limit);
             """
 
@@ -524,44 +602,51 @@ private final class SQLiteDatabase {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """
         let ftsSQL = "INSERT INTO entries_fts(path, name, parent) VALUES (?, ?, ?);"
+        let trigramSQL = "INSERT INTO entries_trigram(path) VALUES (?);"
 
         try withStatement(entrySQL) { entryStatement in
             try withStatement(ftsSQL) { ftsStatement in
-                for entry in entries {
-                    try entryStatement.reset()
-                    try entryStatement.bind([
-                        .text(entry.path),
-                        .text(entry.name),
-                        .text(entry.parent),
-                        .text(entry.extensionName.lowercased()),
-                        .text(entry.kind.rawValue),
-                        .optionalInt64(entry.byteSize),
-                        .optionalDate(entry.createdAt),
-                        .optionalDate(entry.modifiedAt),
-                        .optionalDate(entry.accessedAt),
-                        .date(entry.indexedAt),
-                        .int(Int64(entry.runCountValue)),
-                        .optionalDate(entry.lastRunAt),
-                        .int(Int64(entry.attributes.rawValue)),
-                        .optionalText(entry.fileID),
-                        .optionalText(entry.volumeID),
-                        .optionalText(entry.mediaTitle),
-                        .optionalText(entry.mediaArtist),
-                        .optionalText(entry.mediaAlbum),
-                        .optionalText(entry.mediaComment),
-                        .optionalText(entry.mediaGenre),
-                        .optionalInt64(entry.mediaTrack.map(Int64.init)),
-                        .optionalInt64(entry.mediaYear.map(Int64.init))
-                    ])
-                    try entryStatement.stepDone()
+                try withStatement(trigramSQL) { trigramStatement in
+                    for entry in entries {
+                        try entryStatement.reset()
+                        try entryStatement.bind([
+                            .text(entry.path),
+                            .text(entry.name),
+                            .text(entry.parent),
+                            .text(entry.extensionName.lowercased()),
+                            .text(entry.kind.rawValue),
+                            .optionalInt64(entry.byteSize),
+                            .optionalDate(entry.createdAt),
+                            .optionalDate(entry.modifiedAt),
+                            .optionalDate(entry.accessedAt),
+                            .date(entry.indexedAt),
+                            .int(Int64(entry.runCountValue)),
+                            .optionalDate(entry.lastRunAt),
+                            .int(Int64(entry.attributes.rawValue)),
+                            .optionalText(entry.fileID),
+                            .optionalText(entry.volumeID),
+                            .optionalText(entry.mediaTitle),
+                            .optionalText(entry.mediaArtist),
+                            .optionalText(entry.mediaAlbum),
+                            .optionalText(entry.mediaComment),
+                            .optionalText(entry.mediaGenre),
+                            .optionalInt64(entry.mediaTrack.map(Int64.init)),
+                            .optionalInt64(entry.mediaYear.map(Int64.init))
+                        ])
+                        try entryStatement.stepDone()
 
-                    try ftsStatement.reset()
-                    try ftsStatement.bind([
-                        .text(entry.path),
-                        .text(entry.name),
-                        .text(entry.parent)
-                    ])
-                    try ftsStatement.stepDone()
+                        try ftsStatement.reset()
+                        try ftsStatement.bind([
+                            .text(entry.path),
+                            .text(entry.name),
+                            .text(entry.parent)
+                        ])
+                        try ftsStatement.stepDone()
+
+                        try trigramStatement.reset()
+                        try trigramStatement.bind([.text(entry.path)])
+                        try trigramStatement.stepDone()
+                    }
                 }
             }
         }
@@ -574,14 +659,20 @@ private final class SQLiteDatabase {
 
         try withStatement("DELETE FROM entries WHERE path = ?;") { entryStatement in
             try withStatement("DELETE FROM entries_fts WHERE path = ?;") { ftsStatement in
-                for path in paths {
-                    try entryStatement.reset()
-                    try entryStatement.bind([.text(path)])
-                    try entryStatement.stepDone()
+                try withStatement("DELETE FROM entries_trigram WHERE path = ?;") { trigramStatement in
+                    for path in paths {
+                        try entryStatement.reset()
+                        try entryStatement.bind([.text(path)])
+                        try entryStatement.stepDone()
 
-                    try ftsStatement.reset()
-                    try ftsStatement.bind([.text(path)])
-                    try ftsStatement.stepDone()
+                        try ftsStatement.reset()
+                        try ftsStatement.bind([.text(path)])
+                        try ftsStatement.stepDone()
+
+                        try trigramStatement.reset()
+                        try trigramStatement.bind([.text(path)])
+                        try trigramStatement.stepDone()
+                    }
                 }
             }
         }
@@ -608,6 +699,21 @@ private final class SQLiteDatabase {
             return nil
         }
         return tokens.map { "\($0)*" }.joined(separator: " AND ")
+    }
+
+    private func trigramMatchQuery(for terms: [String]) -> String? {
+        let values = terms
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !values.isEmpty,
+              values.allSatisfy({ $0.count >= 3 }) else {
+            return nil
+        }
+        return values.map(ftsPhrase).joined(separator: " AND ")
+    }
+
+    private func ftsPhrase(_ value: String) -> String {
+        "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
     }
 
     private func ftsTokens(from value: String) -> [String] {
