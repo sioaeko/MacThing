@@ -4351,7 +4351,7 @@ do {
         "scanner should exclude hidden files when the active profile disables them"
     )
 
-    let noisyDirectoryNames = [".git", ".build", "node_modules"]
+    let noisyDirectoryNames = [".git", ".build", ".venv", ".mypy_cache", ".next", "node_modules", "Pods", "venv"]
     for noisyDirectoryName in noisyDirectoryNames {
         let noisyDirectory = temporaryDirectory.appending(path: noisyDirectoryName, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: noisyDirectory, withIntermediateDirectories: true)
@@ -4379,7 +4379,7 @@ do {
     )
 
     let noisyChangedEntries = FileScanner.scanChangedPath(
-        path: temporaryDirectory.appending(path: ".build", directoryHint: .isDirectory).path,
+        path: temporaryDirectory.appending(path: ".venv", directoryHint: .isDirectory).path,
         existingEntriesByPath: [:]
     )
     expect(
@@ -4388,7 +4388,7 @@ do {
     )
     let noisyChildChangedEntries = FileScanner.scanChangedPath(
         path: temporaryDirectory
-            .appending(path: ".git", directoryHint: .isDirectory)
+            .appending(path: "node_modules", directoryHint: .isDirectory)
             .appending(path: "Generated.txt")
             .path,
         existingEntriesByPath: [:]
@@ -4466,6 +4466,25 @@ do {
     expect(
         persistedEntryCount == 2,
         "SQLite index storage should expose persisted entry counts without loading entries"
+    )
+    let persistedNoiseEntry = FileEntry(
+        path: "/Users/me/Project/.venv/lib/site.py",
+        name: "site.py",
+        parent: "/Users/me/Project/.venv/lib",
+        kind: .file,
+        byteSize: 42,
+        modifiedAt: Date(timeIntervalSince1970: 2_700)
+    )
+    try IndexStorage.upsert(entries: [persistedNoiseEntry], rootPath: temporaryDirectory.path, to: databaseURL)
+    let removedSkippedEntries = try IndexStorage.deleteEntries(
+        inSkippedDirectoryNames: FileScanner.defaultSkippedDirectoryNames,
+        from: databaseURL
+    )
+    loadedSnapshot = try IndexStorage.load(from: databaseURL)
+    expect(
+        removedSkippedEntries == 1 &&
+            loadedSnapshot.entries.contains { $0.path == persistedNoiseEntry.path } == false,
+        "SQLite index storage should prune entries below default skipped directories"
     )
 
     try IndexStorage.upsert(entries: [hiddenEntry], rootPath: temporaryDirectory.path, to: databaseURL)

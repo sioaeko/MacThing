@@ -77,4 +77,8 @@ public enum IndexStorage {
     public static func entryCount(from url: URL) throws -> Int {
         try SQLiteIndexStorage.entryCount(from: url)
     }
+
+    public static func deleteEntries(inSkippedDirectoryNames names: Set<String>, from url: URL) throws -> Int {
+        try SQLiteIndexStorage.deleteEntries(inSkippedDirectoryNames: names, from: url)
+    }
 }

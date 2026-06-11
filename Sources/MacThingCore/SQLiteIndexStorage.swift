@@ -76,6 +76,15 @@ public enum SQLiteIndexStorage {
         try database.createSchema()
         return try database.entryCount()
     }
+
+    public static func deleteEntries(
+        inSkippedDirectoryNames names: Set<String>,
+        from url: URL
+    ) throws -> Int {
+        let database = try SQLiteDatabase(url: url)
+        try database.createSchema()
+        return try database.deleteEntries(inSkippedDirectoryNames: names)
+    }
 }
 
 private final class SQLiteDatabase {
@@ -296,6 +305,53 @@ private final class SQLiteDatabase {
         try query("SELECT COUNT(*) FROM entries;") { statement in
             statement.optionalInt(at: 0) ?? 0
         }.first ?? 0
+    }
+
+    func deleteEntries(inSkippedDirectoryNames names: Set<String>) throws -> Int {
+        let names = names
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted()
+        guard !names.isEmpty else {
+            return 0
+        }
+
+        let namePlaceholders = placeholders(count: names.count)
+        let descendantClauses = Array(repeating: "path LIKE ? ESCAPE '\\'", count: names.count)
+            .joined(separator: " OR ")
+        let condition = """
+            ((kind IN (?, ?) AND name IN (\(namePlaceholders))) OR \(descendantClauses))
+            """
+        let bindings: [SQLiteValue] =
+            [.text(FileKind.folder.rawValue), .text(FileKind.package.rawValue)] +
+            names.map { .text($0) } +
+            names.map { .text("%/\(escapeLike($0))/%") }
+
+        var removedCount = 0
+        try transaction {
+            removedCount = try query(
+                "SELECT COUNT(*) FROM entries WHERE \(condition);",
+                bindings: bindings
+            ) { statement in
+                statement.optionalInt(at: 0) ?? 0
+            }.first ?? 0
+
+            guard removedCount > 0 else {
+                return
+            }
+
+            try withStatement(
+                "DELETE FROM entries_fts WHERE path IN (SELECT path FROM entries WHERE \(condition));"
+            ) { statement in
+                try statement.bind(bindings)
+                try statement.stepDone()
+            }
+            try withStatement("DELETE FROM entries WHERE \(condition);") { statement in
+                try statement.bind(bindings)
+                try statement.stepDone()
+            }
+        }
+        return removedCount
     }
 
     private func ftsCandidateEntries(

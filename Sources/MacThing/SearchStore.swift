@@ -1233,8 +1233,14 @@ final class SearchStore: ObservableObject {
 
         for profile in indexProfiles where profile.isEnabled && profile.id != activeProfileID {
             guard let indexURL = try? IndexStorage.profileIndexURL(profileID: profile.id),
-                  FileManager.default.fileExists(atPath: indexURL.path),
-                  let snapshot = try? IndexStorage.load(from: indexURL) else {
+                  FileManager.default.fileExists(atPath: indexURL.path) else {
+                continue
+            }
+            _ = try? IndexStorage.deleteEntries(
+                inSkippedDirectoryNames: FileScanner.defaultSkippedDirectoryNames,
+                from: indexURL
+            )
+            guard let snapshot = try? IndexStorage.load(from: indexURL) else {
                 continue
             }
             auxiliaryProfileEntriesByID[profile.id] = snapshot.entries
@@ -1271,6 +1277,10 @@ final class SearchStore: ObservableObject {
         }
 
         do {
+            _ = try? IndexStorage.deleteEntries(
+                inSkippedDirectoryNames: FileScanner.defaultSkippedDirectoryNames,
+                from: loadURL
+            )
             let snapshot = try IndexStorage.load(from: loadURL)
             if loadURL.path != indexURL.path {
                 try? IndexStorage.save(snapshot, to: indexURL)
