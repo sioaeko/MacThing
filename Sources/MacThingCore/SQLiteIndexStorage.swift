@@ -88,11 +88,33 @@ public enum SQLiteIndexStorage {
 }
 
 private final class SQLiteDatabase {
+    private final class SchemaReadyCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var paths = Set<String>()
+
+        func contains(_ path: String) -> Bool {
+            lock.lock()
+            let result = paths.contains(path)
+            lock.unlock()
+            return result
+        }
+
+        func insert(_ path: String) {
+            lock.lock()
+            paths.insert(path)
+            lock.unlock()
+        }
+    }
+
+    private static let schemaReadyCache = SchemaReadyCache()
+
     private var db: OpaquePointer?
+    private let databasePath: String
     private let derivedColumnsBackfillKey = "derivedColumnsBackfilledV2"
     private let trigramBackfillKey = "trigramBackfilledV1"
 
     init(url: URL) throws {
+        self.databasePath = url.path
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -109,6 +131,11 @@ private final class SQLiteDatabase {
     }
 
     func createSchema() throws {
+        if Self.schemaReadyCache.contains(databasePath),
+           try hasCoreSchemaTables() {
+            return
+        }
+
         try execute("PRAGMA journal_mode=WAL;")
         try execute("PRAGMA synchronous=NORMAL;")
         try execute("PRAGMA temp_store=MEMORY;")
@@ -184,6 +211,21 @@ private final class SQLiteDatabase {
             """)
         try backfillDerivedColumnsIfNeeded()
         try backfillTrigramIndexIfNeeded()
+        Self.schemaReadyCache.insert(databasePath)
+    }
+
+    private func hasCoreSchemaTables() throws -> Bool {
+        let tableCount = try query(
+            """
+            SELECT COUNT(*)
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name IN ('meta', 'entries', 'entries_fts', 'entries_trigram');
+            """
+        ) { statement in
+            statement.optionalInt(at: 0) ?? 0
+        }.first ?? 0
+        return tableCount == 4
     }
 
     private func backfillDerivedColumnsIfNeeded() throws {
