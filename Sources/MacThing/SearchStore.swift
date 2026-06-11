@@ -178,6 +178,12 @@ private struct PersistedSearchSettings: Codable {
     var launchAtLogin: Bool?
 }
 
+private struct PersistedIndexLoadState: Sendable {
+    var activeSnapshot: IndexSnapshot?
+    var auxiliaryProfileEntriesByID: [String: [FileEntry]]
+    var activeIndexLoadFailed: Bool
+}
+
 private final class QueryServiceState: @unchecked Sendable {
     private struct Snapshot {
         var rootPath = ""
@@ -307,6 +313,7 @@ final class SearchStore: ObservableObject {
     private var searchTask: Task<Void, Never>?
     private var historyTask: Task<Void, Never>?
     private var indexTask: Task<Void, Never>?
+    private var loadIndexTask: Task<Void, Never>?
     private var monitorReindexTasksByProfileID: [String: Task<Void, Never>] = [:]
     private var fileSystemMonitorsByProfileID: [String: FileSystemMonitor] = [:]
     private var queryHTTPServer: QueryHTTPServer?
@@ -443,15 +450,14 @@ final class SearchStore: ObservableObject {
         loadFileListSources()
         loadIndexProfiles()
         ensureActiveProfile()
-        loadPersistedIndex()
+        statusText = "Loading saved index..."
         refreshVolumes()
         refreshPermissionDiagnostics()
         refreshLaunchAtLoginState()
         updateQueryServiceState()
-        startMonitoringEnabledProfiles()
         startQueryService()
         startGlobalHotkey()
-        scheduleSearch()
+        loadPersistedIndexInBackground()
     }
 
     func setQuery(_ value: String) {
@@ -567,6 +573,7 @@ final class SearchStore: ObservableObject {
     }
 
     func activateProfile(_ profile: IndexProfile) {
+        loadIndexTask?.cancel()
         activeProfileID = profile.id
         rootPath = profile.rootPath
         saveSettings()
@@ -598,6 +605,7 @@ final class SearchStore: ObservableObject {
             return
         }
 
+        loadIndexTask?.cancel()
         indexProfiles.removeAll { $0.id == profile.id }
         auxiliaryProfileEntriesByID.removeValue(forKey: profile.id)
         normalizeProfileEnabledState()
@@ -624,6 +632,7 @@ final class SearchStore: ObservableObject {
             return
         }
 
+        loadIndexTask?.cancel()
         indexProfiles[index].isEnabled.toggle()
         indexProfiles[index].updatedAt = Date()
         let updatedProfile = indexProfiles[index]
@@ -1155,11 +1164,64 @@ final class SearchStore: ObservableObject {
     }
 
     private func loadPersistedIndex() {
-        loadEnabledAuxiliaryProfileIndexes()
+        loadIndexTask?.cancel()
+        let state = Self.loadPersistedIndexState(
+            indexProfiles: indexProfiles,
+            activeProfileID: activeProfileID,
+            activeIndexURL: activeIndexURL
+        )
+        applyPersistedIndexState(state)
+    }
+
+    private func loadPersistedIndexInBackground() {
+        loadIndexTask?.cancel()
+
+        let indexProfiles = indexProfiles
+        let activeProfileID = activeProfileID
+        let activeIndexURL = activeIndexURL
+
+        loadIndexTask = Task { [weak self] in
+            let state = await Task.detached(priority: .userInitiated) {
+                Self.loadPersistedIndexState(
+                    indexProfiles: indexProfiles,
+                    activeProfileID: activeProfileID,
+                    activeIndexURL: activeIndexURL
+                )
+            }.value
+
+            guard let self, !Task.isCancelled else {
+                return
+            }
+
+            self.applyPersistedIndexState(state)
+            self.loadIndexTask = nil
+            self.startMonitoringEnabledProfiles()
+            self.scheduleSearch()
+        }
+    }
+
+    private nonisolated static func loadPersistedIndexState(
+        indexProfiles: [IndexProfile],
+        activeProfileID: String?,
+        activeIndexURL: URL?
+    ) -> PersistedIndexLoadState {
+        var auxiliaryProfileEntriesByID: [String: [FileEntry]] = [:]
+
+        for profile in indexProfiles where profile.isEnabled && profile.id != activeProfileID {
+            guard let indexURL = try? IndexStorage.profileIndexURL(profileID: profile.id),
+                  FileManager.default.fileExists(atPath: indexURL.path),
+                  let snapshot = try? IndexStorage.load(from: indexURL) else {
+                continue
+            }
+            auxiliaryProfileEntriesByID[profile.id] = snapshot.entries
+        }
 
         guard let indexURL = activeIndexURL else {
-            clearLoadedIndex(status: "No index")
-            return
+            return PersistedIndexLoadState(
+                activeSnapshot: nil,
+                auxiliaryProfileEntriesByID: auxiliaryProfileEntriesByID,
+                activeIndexLoadFailed: false
+            )
         }
 
         let legacyURL = try? IndexStorage.defaultIndexURL()
@@ -1177,8 +1239,11 @@ final class SearchStore: ObservableObject {
         }
 
         guard let loadURL else {
-            clearLoadedIndex(status: "No index")
-            return
+            return PersistedIndexLoadState(
+                activeSnapshot: nil,
+                auxiliaryProfileEntriesByID: auxiliaryProfileEntriesByID,
+                activeIndexLoadFailed: false
+            )
         }
 
         do {
@@ -1186,25 +1251,44 @@ final class SearchStore: ObservableObject {
             if loadURL.path != indexURL.path {
                 try? IndexStorage.save(snapshot, to: indexURL)
             }
-            rootPath = snapshot.rootPath
-            fileIndex.replaceAll(snapshot.entries)
-            rebuildEntriesFromIndexes()
-            lastIndexedAt = snapshot.createdAt
-            statusText = "\(entries.count.formatted()) items\(enabledProfileCount > 1 ? " across \(enabledProfileCount) profiles" : "")"
-            updateQueryServiceState()
+            return PersistedIndexLoadState(
+                activeSnapshot: snapshot,
+                auxiliaryProfileEntriesByID: auxiliaryProfileEntriesByID,
+                activeIndexLoadFailed: false
+            )
         } catch {
-            statusText = "Index could not be loaded"
+            return PersistedIndexLoadState(
+                activeSnapshot: nil,
+                auxiliaryProfileEntriesByID: auxiliaryProfileEntriesByID,
+                activeIndexLoadFailed: true
+            )
         }
     }
 
+    private func applyPersistedIndexState(_ state: PersistedIndexLoadState) {
+        auxiliaryProfileEntriesByID = state.auxiliaryProfileEntriesByID
+
+        guard let snapshot = state.activeSnapshot else {
+            clearLoadedIndex(status: state.activeIndexLoadFailed ? "Index could not be loaded" : "No index")
+            return
+        }
+
+        rootPath = snapshot.rootPath
+        fileIndex.replaceAll(snapshot.entries)
+        rebuildEntriesFromIndexes()
+        lastIndexedAt = snapshot.createdAt
+        statusText = "\(entries.count.formatted()) items\(enabledProfileCount > 1 ? " across \(enabledProfileCount) profiles" : "")"
+        updateQueryServiceState()
+    }
+
     private func clearLoadedIndex(status: String) {
-            fileIndex.replaceAll([])
-            rebuildEntriesFromIndexes()
-            results = []
-            totalMatches = 0
-            lastIndexedAt = nil
-            statusText = entries.isEmpty ? status : "\(entries.count.formatted()) items"
-            updateQueryServiceState()
+        fileIndex.replaceAll([])
+        rebuildEntriesFromIndexes()
+        results = []
+        totalMatches = 0
+        lastIndexedAt = nil
+        statusText = entries.isEmpty ? status : "\(entries.count.formatted()) items"
+        updateQueryServiceState()
     }
 
     private func loadSettings() {
@@ -1406,21 +1490,6 @@ final class SearchStore: ObservableObject {
         entries = FileIndex(entries: Array(combinedByPath.values)).entries
     }
 
-    private func loadEnabledAuxiliaryProfileIndexes() {
-        var loadedEntriesByProfileID: [String: [FileEntry]] = [:]
-
-        for profile in indexProfiles where profile.isEnabled && profile.id != activeProfileID {
-            guard let indexURL = try? IndexStorage.profileIndexURL(profileID: profile.id),
-                  FileManager.default.fileExists(atPath: indexURL.path),
-                  let snapshot = try? IndexStorage.load(from: indexURL) else {
-                continue
-            }
-            loadedEntriesByProfileID[profile.id] = snapshot.entries
-        }
-
-        auxiliaryProfileEntriesByID = loadedEntriesByProfileID
-    }
-
     private func loadAuxiliaryProfileIndex(_ profile: IndexProfile) {
         guard profile.isEnabled,
               profile.id != activeProfileID,
@@ -1473,6 +1542,7 @@ final class SearchStore: ObservableObject {
             return
         }
 
+        loadIndexTask?.cancel()
         if profileID == activeProfileID {
             index(rootURL: URL(fileURLWithPath: profile.rootPath))
             return
@@ -1561,6 +1631,7 @@ final class SearchStore: ObservableObject {
     }
 
     private func index(rootURL: URL) {
+        loadIndexTask?.cancel()
         indexTask?.cancel()
         searchTask?.cancel()
 
