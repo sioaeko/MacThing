@@ -19,7 +19,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/sioaeko/MacThing/releases/download/v0.1.3/MacThing-0.1.3.dmg"><strong>Download DMG</strong></a>
+  <a href="https://sioaeko.github.io/MacThing/"><strong>Website</strong></a>
+  ·
+  <a href="https://github.com/sioaeko/MacThing/releases/latest"><strong>Download DMG</strong></a>
   ·
   <a href="#run">Run from source</a>
   ·
