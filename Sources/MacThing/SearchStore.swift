@@ -919,14 +919,16 @@ final class SearchStore: ObservableObject {
     }
 
     func setGlobalHotkeyChoice(_ choice: GlobalHotkeyChoice) {
+        let previousChoice = globalHotkeyChoice
+        if globalHotkeyController?.register(choice) == false {
+            _ = globalHotkeyController?.register(previousChoice)
+            statusText = "Hotkey unavailable"
+            return
+        }
+
         globalHotkeyChoice = choice
         saveSettings()
-
-        if globalHotkeyController?.register(choice) == false {
-            statusText = "Hotkey unavailable"
-        } else {
-            statusText = choice == .disabled ? "Hotkey disabled" : "Hotkey: \(choice.displayName)"
-        }
+        statusText = choice == .disabled ? "Hotkey disabled" : "Hotkey: \(choice.displayName)"
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
