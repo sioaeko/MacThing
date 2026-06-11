@@ -4446,6 +4446,11 @@ do {
         loadedSnapshot.entries.map(\.path) == [document.path, photo.path].sorted(),
         "SQLite index storage should persist and load full snapshots"
     )
+    let persistedEntryCount = try IndexStorage.entryCount(from: databaseURL)
+    expect(
+        persistedEntryCount == 2,
+        "SQLite index storage should expose persisted entry counts without loading entries"
+    )
 
     try IndexStorage.upsert(entries: [hiddenEntry], rootPath: temporaryDirectory.path, to: databaseURL)
     loadedSnapshot = try IndexStorage.load(from: databaseURL)

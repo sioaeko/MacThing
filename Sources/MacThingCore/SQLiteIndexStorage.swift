@@ -70,6 +70,12 @@ public enum SQLiteIndexStorage {
         try database.createSchema()
         return try database.windowEntries(limit: limit, offset: offset)
     }
+
+    public static func entryCount(from url: URL) throws -> Int {
+        let database = try SQLiteDatabase(url: url)
+        try database.createSchema()
+        return try database.entryCount()
+    }
 }
 
 private final class SQLiteDatabase {
@@ -284,6 +290,12 @@ private final class SQLiteDatabase {
         return try query(sql) { statement in
             self.entry(from: statement)
         }
+    }
+
+    func entryCount() throws -> Int {
+        try query("SELECT COUNT(*) FROM entries;") { statement in
+            statement.optionalInt(at: 0) ?? 0
+        }.first ?? 0
     }
 
     private func ftsCandidateEntries(

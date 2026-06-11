@@ -188,6 +188,7 @@ private final class QueryServiceState: @unchecked Sendable {
     private struct Snapshot {
         var rootPath = ""
         var entries: [FileEntry] = []
+        var indexedCount = 0
         var indexURLs: [URL] = []
         var fileListEntries: [FileEntry] = []
         var resultCount = 0
@@ -205,6 +206,7 @@ private final class QueryServiceState: @unchecked Sendable {
     func update(
         rootPath: String,
         entries: [FileEntry],
+        indexedCount: Int,
         indexURLs: [URL],
         fileListEntries: [FileEntry],
         resultCount: Int,
@@ -219,6 +221,7 @@ private final class QueryServiceState: @unchecked Sendable {
         snapshot = Snapshot(
             rootPath: rootPath,
             entries: entries,
+            indexedCount: indexedCount,
             indexURLs: indexURLs,
             fileListEntries: fileListEntries,
             resultCount: resultCount,
@@ -239,7 +242,7 @@ private final class QueryServiceState: @unchecked Sendable {
 
         return QueryHTTPServer.Status(
             rootPath: current.rootPath,
-            indexedCount: current.entries.count,
+            indexedCount: max(current.entries.count, current.indexedCount),
             resultCount: current.resultCount,
             lastIndexedAt: current.lastIndexedAt,
             statusText: current.statusText,
@@ -255,6 +258,7 @@ private final class QueryServiceState: @unchecked Sendable {
         if let databaseResponse = SearchStore.databaseBackedSearch(
             request: request,
             entries: current.entries,
+            indexedCount: current.indexedCount,
             indexURLs: current.indexURLs,
             activeFileListEntries: current.fileListEntries
         ) {
@@ -329,6 +333,7 @@ final class SearchStore: ObservableObject {
     private var compactSearchWindowController: CompactSearchWindowController?
     private let queryServiceState = QueryServiceState()
     private var fileIndex = FileIndex()
+    private var storedIndexedCount = 0
     private var auxiliaryProfileEntriesByID: [String: [FileEntry]] = [:]
     private var pendingFileSystemChangesByProfileID: [String: [String: FileSystemChange]] = [:]
     private let settingsKey = "MacThing.SearchSettings.v1"
@@ -458,6 +463,7 @@ final class SearchStore: ObservableObject {
         loadFileListSources()
         loadIndexProfiles()
         ensureActiveProfile()
+        storedIndexedCount = Self.databaseEntryCount(indexURLs: enabledProfileIndexURLs)
         statusText = "Loading saved index..."
         refreshVolumes()
         refreshPermissionDiagnostics()
@@ -1284,6 +1290,7 @@ final class SearchStore: ObservableObject {
         rootPath = snapshot.rootPath
         fileIndex.replaceAll(snapshot.entries)
         rebuildEntriesFromIndexes()
+        storedIndexedCount = entries.count
         lastIndexedAt = snapshot.createdAt
         statusText = "\(entries.count.formatted()) items\(enabledProfileCount > 1 ? " across \(enabledProfileCount) profiles" : "")"
         updateQueryServiceState()
@@ -1292,6 +1299,7 @@ final class SearchStore: ObservableObject {
     private func clearLoadedIndex(status: String) {
         fileIndex.replaceAll([])
         rebuildEntriesFromIndexes()
+        storedIndexedCount = entries.count
         results = []
         totalMatches = 0
         lastIndexedAt = nil
@@ -1574,6 +1582,7 @@ final class SearchStore: ObservableObject {
 
             self.replaceEntries(scannedEntries, forProfileID: profileID)
             self.rebuildEntriesFromIndexes()
+            self.storedIndexedCount = self.entries.count
             self.lastIndexedAt = Date()
             self.isIndexing = false
             self.statusText = "\(self.entries.count.formatted()) items\(self.enabledProfileCount > 1 ? " across \(self.enabledProfileCount) profiles" : "")"
@@ -1664,6 +1673,7 @@ final class SearchStore: ObservableObject {
 
             self.fileIndex.replaceAll(scannedEntries)
             self.rebuildEntriesFromIndexes()
+            self.storedIndexedCount = self.entries.count
             self.lastIndexedAt = Date()
             self.isIndexing = false
             self.statusText = "\(self.entries.count.formatted()) items\(self.enabledProfileCount > 1 ? " across \(self.enabledProfileCount) profiles" : "")"
@@ -1855,6 +1865,7 @@ final class SearchStore: ObservableObject {
 
         replaceEntries(profileIndex.entries, forProfileID: profileID)
         rebuildEntriesFromIndexes()
+        storedIndexedCount = entries.count
         lastIndexedAt = Date()
         statusText = "\(entries.count.formatted()) items\(enabledProfileCount > 1 ? " across \(enabledProfileCount) profiles" : "")"
         updateQueryServiceState()
@@ -2019,6 +2030,7 @@ final class SearchStore: ObservableObject {
         let sortDirection = sortDirection
         let searchOptions = searchOptions
         let indexURLs = enabledProfileIndexURLs
+        let indexedCount = max(entries.count, storedIndexedCount)
         let activeFileListEntries = fileListSources
             .filter(\.isEnabled)
             .flatMap(\.entriesWithSourceMetadata)
@@ -2037,6 +2049,7 @@ final class SearchStore: ObservableObject {
                 if let databaseResponse = Self.databaseBackedSearch(
                     request: request,
                     entries: entries,
+                    indexedCount: indexedCount,
                     indexURLs: indexURLs,
                     activeFileListEntries: activeFileListEntries
                 ) {
@@ -2095,6 +2108,7 @@ final class SearchStore: ObservableObject {
         queryServiceState.update(
             rootPath: rootPath,
             entries: entries,
+            indexedCount: max(entries.count, storedIndexedCount),
             indexURLs: enabledProfileIndexURLs,
             fileListEntries: fileListSources
                 .filter(\.isEnabled)
@@ -2121,13 +2135,23 @@ final class SearchStore: ObservableObject {
         return "\(filterPrefix) \(trimmedUserQuery)"
     }
 
+    private nonisolated static func databaseEntryCount(indexURLs: [URL]) -> Int {
+        var totalCount = 0
+        for indexURL in indexURLs where FileManager.default.fileExists(atPath: indexURL.path) {
+            totalCount += (try? IndexStorage.entryCount(from: indexURL)) ?? 0
+        }
+        return totalCount
+    }
+
     fileprivate nonisolated static func databaseBackedSearch(
         request: SearchRequest,
         entries: [FileEntry],
+        indexedCount: Int,
         indexURLs: [URL],
         activeFileListEntries: [FileEntry]
     ) -> SearchResponse? {
-        guard entries.count > 25_000 else {
+        let effectiveIndexedCount = max(entries.count, indexedCount)
+        guard effectiveIndexedCount > 25_000 || (entries.isEmpty && !indexURLs.isEmpty) else {
             return nil
         }
 
@@ -2140,7 +2164,7 @@ final class SearchStore: ObservableObject {
             let windowResponse = SearchEngine.searchCandidateSubset(request: request, in: windowEntries)
             return SearchResponse(
                 entries: windowResponse.entries,
-                totalMatches: entries.count,
+                totalMatches: effectiveIndexedCount,
                 warnings: windowResponse.warnings
             )
         }

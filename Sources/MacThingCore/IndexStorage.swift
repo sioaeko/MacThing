@@ -73,4 +73,8 @@ public enum IndexStorage {
     public static func windowEntries(limit: Int, offset: Int, from url: URL) throws -> [FileEntry] {
         try SQLiteIndexStorage.windowEntries(limit: limit, offset: offset, from: url)
     }
+
+    public static func entryCount(from url: URL) throws -> Int {
+        try SQLiteIndexStorage.entryCount(from: url)
+    }
 }
