@@ -4397,6 +4397,35 @@ do {
         noisyChildChangedEntries.isEmpty,
         "scanChangedPath should skip changes below default developer noise directories"
     )
+    expect(
+        FileScanner.isPathInSkippedDirectory(
+            temporaryDirectory
+                .appending(path: ".git", directoryHint: .isDirectory)
+                .appending(path: "objects", directoryHint: .isDirectory)
+                .appending(path: "pack.tmp")
+                .path,
+            rootPath: temporaryDirectory.path
+        ),
+        "scanner should identify changes inside skipped directories for file-system monitoring"
+    )
+    expect(
+        FileScanner.isPathInSkippedDirectory(
+            temporaryDirectory
+                .appending(path: "Sources", directoryHint: .isDirectory)
+                .appending(path: "App.swift")
+                .path,
+            rootPath: temporaryDirectory.path
+        ) == false,
+        "scanner should keep ordinary changed files visible to file-system monitoring"
+    )
+    expect(
+        FileScanner.isPathInSkippedDirectory("/.git/objects/pack.tmp", rootPath: "/"),
+        "scanner should identify skipped directory changes when the indexed root is the filesystem root"
+    )
+    expect(
+        FileScanner.isPathInSkippedDirectory("/Users/me/App.swift", rootPath: "/") == false,
+        "scanner should keep ordinary root-level paths visible when the indexed root is the filesystem root"
+    )
 
     let identityFile = temporaryDirectory.appending(path: "Identity.txt")
     let renamedIdentityFile = temporaryDirectory.appending(path: "Identity Renamed.txt")

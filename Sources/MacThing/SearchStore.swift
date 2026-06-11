@@ -1788,9 +1788,19 @@ final class SearchStore: ObservableObject {
         guard !changes.isEmpty else {
             return
         }
+        guard let profile = indexProfiles.first(where: { $0.id == profileID }) else {
+            return
+        }
+
+        let relevantChanges = changes.filter {
+            !FileScanner.isPathInSkippedDirectory($0.path, rootPath: profile.rootPath)
+        }
+        guard !relevantChanges.isEmpty else {
+            return
+        }
 
         var pendingChanges = pendingFileSystemChangesByProfileID[profileID] ?? [:]
-        for change in changes {
+        for change in relevantChanges {
             if let existing = pendingChanges[change.path] {
                 pendingChanges[change.path] = existing.merging(change)
             } else {

@@ -226,6 +226,32 @@ public enum FileScanner {
         )
     }
 
+    public static func isPathInSkippedDirectory(
+        _ path: String,
+        rootPath: String? = nil,
+        skippedDirectoryNames: Set<String> = defaultSkippedDirectoryNames
+    ) -> Bool {
+        let normalizedPath = URL(fileURLWithPath: path).standardizedFileURL.path
+        let components: [String]
+        if let rootPath {
+            let normalizedRoot = URL(fileURLWithPath: rootPath).standardizedFileURL.path
+            let isInsideRoot = normalizedRoot == "/"
+                ? normalizedPath.hasPrefix("/")
+                : normalizedPath == normalizedRoot || normalizedPath.hasPrefix(normalizedRoot + "/")
+            guard isInsideRoot else {
+                return false
+            }
+            let relativeStart = normalizedRoot == "/" ? 1 : normalizedRoot.count + 1
+            let relativePath = normalizedPath == normalizedRoot
+                ? ""
+                : String(normalizedPath.dropFirst(relativeStart))
+            components = relativePath.split(separator: "/").map(String.init)
+        } else {
+            components = URL(fileURLWithPath: normalizedPath).pathComponents
+        }
+        return components.contains { skippedDirectoryNames.contains($0) }
+    }
+
     private static func makeEntry(
         url: URL,
         kind: FileKind,
@@ -456,10 +482,7 @@ public enum FileScanner {
     }
 
     private static func isUnderSkippedDirectory(url: URL, configuration: ScanConfiguration) -> Bool {
-        url
-            .standardizedFileURL
-            .pathComponents
-            .contains { configuration.skippedDirectoryNames.contains($0) }
+        isPathInSkippedDirectory(url.path, skippedDirectoryNames: configuration.skippedDirectoryNames)
     }
 
     private static func matchesAnyNamePattern(_ name: String, patterns: [String]) -> Bool {
