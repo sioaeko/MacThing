@@ -131,14 +131,13 @@ private final class SQLiteDatabase {
     }
 
     func createSchema() throws {
+        try configureConnection()
         if Self.schemaReadyCache.contains(databasePath),
            try hasCoreSchemaTables() {
             return
         }
 
         try execute("PRAGMA journal_mode=WAL;")
-        try execute("PRAGMA synchronous=NORMAL;")
-        try execute("PRAGMA temp_store=MEMORY;")
         try execute("""
             CREATE TABLE IF NOT EXISTS meta (
                 key TEXT PRIMARY KEY NOT NULL,
@@ -212,6 +211,11 @@ private final class SQLiteDatabase {
         try backfillDerivedColumnsIfNeeded()
         try backfillTrigramIndexIfNeeded()
         Self.schemaReadyCache.insert(databasePath)
+    }
+
+    private func configureConnection() throws {
+        try execute("PRAGMA synchronous=NORMAL;")
+        try execute("PRAGMA temp_store=MEMORY;")
     }
 
     private func hasCoreSchemaTables() throws -> Bool {
