@@ -305,7 +305,6 @@ private final class SQLiteDatabase {
             JOIN entries ON entries.path = entries_fts.path
             WHERE entries_fts MATCH ?
             \(filterClause)
-            ORDER BY bm25(entries_fts), entries.modified_at DESC, entries.name ASC
             LIMIT \(limit);
             """
 
