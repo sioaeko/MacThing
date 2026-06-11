@@ -231,12 +231,7 @@ private final class SQLiteDatabase {
     }
 
     private func backfillTrigramIndexIfNeeded() throws {
-        let entryCount = try entryCount()
-        let trigramCount = try query("SELECT COUNT(*) FROM entries_trigram;") { statement in
-            statement.optionalInt(at: 0) ?? 0
-        }.first ?? 0
-        if try stringMetaValue(forKey: trigramBackfillKey) == "1",
-           entryCount == trigramCount {
+        if try stringMetaValue(forKey: trigramBackfillKey) == "1" {
             return
         }
 
