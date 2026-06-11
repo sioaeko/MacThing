@@ -50,6 +50,14 @@ public struct VolumeProfile: Codable, Hashable, Identifiable, Sendable {
     public var menuTitle: String {
         "\(displayName) (\(locationDescription)) - \(path)"
     }
+
+    public var requiresIndexConfirmation: Bool {
+        !isLocal
+    }
+
+    public var indexConfirmationMessage: String {
+        "\(displayName) is a network volume. Choose it again to index."
+    }
 }
 
 public enum VolumeProfileProvider {

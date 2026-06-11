@@ -309,7 +309,12 @@ private struct MoreMenu: View {
                         Button {
                             store.indexVolume(profile)
                         } label: {
-                            Text(profile.menuTitle)
+                            Label(
+                                profile.menuTitle,
+                                systemImage: profile.requiresIndexConfirmation
+                                    ? "exclamationmark.triangle"
+                                    : "externaldrive"
+                            )
                         }
                     }
                 } else {

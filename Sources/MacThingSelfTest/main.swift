@@ -4105,6 +4105,22 @@ expect(
     mountedVolumes.contains { $0.path == "/" },
     "volume profiles should include the root volume"
 )
+let networkVolume = VolumeProfile(
+    id: "smb-share",
+    name: "Team Share",
+    path: "/Volumes/Team Share",
+    isLocal: false,
+    isInternal: false,
+    isRemovable: false,
+    capacity: nil,
+    availableCapacity: nil
+)
+expect(
+    networkVolume.requiresIndexConfirmation &&
+        networkVolume.locationDescription == "Network" &&
+        networkVolume.indexConfirmationMessage.contains("Choose it again"),
+    "network volume profiles should require explicit indexing confirmation"
+)
 
 do {
     let temporaryDirectory = FileManager.default.temporaryDirectory

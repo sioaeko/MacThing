@@ -334,6 +334,7 @@ final class SearchStore: ObservableObject {
     private let queryServiceState = QueryServiceState()
     private var fileIndex = FileIndex()
     private var storedIndexedCount = 0
+    private var pendingVolumeConfirmationPath: String?
     private var auxiliaryProfileEntriesByID: [String: [FileEntry]] = [:]
     private var pendingFileSystemChangesByProfileID: [String: [String: FileSystemChange]] = [:]
     private let settingsKey = "MacThing.SearchSettings.v1"
@@ -557,6 +558,15 @@ final class SearchStore: ObservableObject {
     }
 
     func indexVolume(_ profile: VolumeProfile) {
+        if profile.requiresIndexConfirmation,
+           pendingVolumeConfirmationPath != profile.path {
+            pendingVolumeConfirmationPath = profile.path
+            statusText = profile.indexConfirmationMessage
+            updateQueryServiceState()
+            return
+        }
+
+        pendingVolumeConfirmationPath = nil
         activateOrCreateProfile(rootPath: profile.path, name: profile.displayName)
         reindexCurrentRoot()
     }
