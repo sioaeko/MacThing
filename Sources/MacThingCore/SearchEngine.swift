@@ -2425,7 +2425,6 @@ private indirect enum SearchPredicate {
     private func textScore(value: String, entry: FileEntry, options: SearchOptions) -> Int? {
         let query = SearchEngine.normalize(substituteSearchValue(value, entry: entry), options: options)
         let name = SearchEngine.normalize(entry.name, options: options)
-        let path = SearchEngine.normalize(entry.path, options: options)
 
         if name == query {
             return 0
@@ -2434,8 +2433,11 @@ private indirect enum SearchPredicate {
             if containsWholeWord(query, in: name) {
                 return 10
             }
-            if shouldSearchPath(query, options: options), containsWholeWord(query, in: path) {
-                return 26
+            if shouldSearchPath(query, options: options) {
+                let path = SearchEngine.normalize(entry.path, options: options)
+                if containsWholeWord(query, in: path) {
+                    return 26
+                }
             }
             return nil
         }
@@ -2445,8 +2447,11 @@ private indirect enum SearchPredicate {
         if name.contains(query) {
             return 12
         }
-        if shouldSearchPath(query, options: options), path.contains(query) {
-            return 28
+        if shouldSearchPath(query, options: options) {
+            let path = SearchEngine.normalize(entry.path, options: options)
+            if path.contains(query) {
+                return 28
+            }
         }
         if options.fuzzyMatching, SearchEngine.isSubsequence(query, of: name) {
             return 56
