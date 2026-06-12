@@ -14,6 +14,8 @@ STAGING_DIR="$DIST_DIR/dmg-staging"
 DMG_PATH="$DIST_DIR/$APP_NAME-$VERSION.dmg"
 ICONSET_DIR="$DIST_DIR/$APP_NAME.iconset"
 ICON_DOC="${ICON_DOC:-$ROOT_DIR/Assets/$APP_NAME.icon}"
+README_ICON_PATH="$ROOT_DIR/Assets/README/$APP_NAME-icon.png"
+DOCS_ICON_PATH="$ROOT_DIR/docs/assets/$APP_NAME-icon.png"
 EXECUTABLE_PATH="$ROOT_DIR/.build/$CONFIGURATION/$APP_NAME"
 
 rm -rf "$APP_BUNDLE" "$STAGING_DIR" "$ICONSET_DIR" "$DMG_PATH"
@@ -90,6 +92,10 @@ export_icon_image "$ICONSET_DIR/icon_256x256.png" 256 1
 export_icon_image "$ICONSET_DIR/icon_256x256@2x.png" 256 2
 export_icon_image "$ICONSET_DIR/icon_512x512.png" 512 1
 export_icon_image "$ICONSET_DIR/icon_512x512@2x.png" 512 2
+
+mkdir -p "$(dirname "$README_ICON_PATH")" "$(dirname "$DOCS_ICON_PATH")"
+cp "$ICONSET_DIR/icon_512x512.png" "$README_ICON_PATH"
+cp "$ICONSET_DIR/icon_512x512.png" "$DOCS_ICON_PATH"
 
 iconutil --convert icns \
     --output "$APP_BUNDLE/Contents/Resources/$APP_NAME.icns" \
