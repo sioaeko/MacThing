@@ -4369,7 +4369,20 @@ do {
         "scanner should exclude hidden files when the active profile disables them"
     )
 
-    let noisyDirectoryNames = [".git", ".build", ".venv", ".mypy_cache", ".next", "node_modules", "Pods", "venv"]
+    let noisyDirectoryNames = [
+        ".git",
+        ".build",
+        ".venv",
+        ".mypy_cache",
+        ".next",
+        ".platformio",
+        ".pio",
+        ".npm",
+        ".pnpm-store",
+        "node_modules",
+        "Pods",
+        "venv"
+    ]
     for noisyDirectoryName in noisyDirectoryNames {
         let noisyDirectory = temporaryDirectory.appending(path: noisyDirectoryName, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: noisyDirectory, withIntermediateDirectories: true)
