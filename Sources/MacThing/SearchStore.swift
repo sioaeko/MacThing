@@ -1847,17 +1847,13 @@ final class SearchStore: ObservableObject {
         }
 
         let rootPath = profile.rootPath
-        let normalizedPaths = normalizedChangedPaths(for: changes).sorted { lhs, rhs in
-            lhs.count < rhs.count
-        }
+        let normalizedPaths = coalescedChangedPaths(for: changes, rootPath: rootPath)
 
         if normalizedPaths.isEmpty {
             return
         }
 
-        if changes.contains(where: \.requiresFullScan) ||
-            normalizedPaths.count > 128 ||
-            normalizedPaths.contains(where: { $0 == rootPath }) {
+        if changes.contains(where: \.requiresFullScan) {
             reindexProfile(profileID: profileID)
             return
         }
@@ -1963,6 +1959,30 @@ final class SearchStore: ObservableObject {
             }
         }
         return Array(paths)
+    }
+
+    private func coalescedChangedPaths(for changes: [FileSystemChange], rootPath: String) -> [String] {
+        let rootPath = URL(fileURLWithPath: rootPath).standardizedFileURL.path
+        let sortedPaths = normalizedChangedPaths(for: changes)
+            .map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+            .filter { $0 != rootPath }
+            .sorted { lhs, rhs in
+                if lhs.count == rhs.count {
+                    return lhs.localizedStandardCompare(rhs) == .orderedAscending
+                }
+                return lhs.count < rhs.count
+            }
+
+        var coalescedPaths: [String] = []
+        for path in sortedPaths {
+            guard !coalescedPaths.contains(where: { existingPath in
+                path.hasPrefix(existingPath + "/")
+            }) else {
+                continue
+            }
+            coalescedPaths.append(path)
+        }
+        return coalescedPaths
     }
 
     private func persistIndex(entries: [FileEntry], rootPath: String) {
