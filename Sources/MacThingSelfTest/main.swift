@@ -37,6 +37,20 @@ final class HTTPResultBox: @unchecked Sendable {
     }
 }
 
+let defaultShortcuts = AppShortcutSettings.defaults
+expect(
+    defaultShortcuts.choice(for: .quickSearch) == .optionSpace &&
+        defaultShortcuts.choice(for: .reindex) == .commandShiftR,
+    "app shortcuts should keep existing default command mappings"
+)
+
+let reassignedShortcuts = defaultShortcuts.setting(.commandShiftR, for: .quickSearch)
+expect(
+    reassignedShortcuts.choice(for: .quickSearch) == .commandShiftR &&
+        reassignedShortcuts.choice(for: .reindex) == .disabled,
+    "app shortcut settings should clear duplicate command mappings"
+)
+
 func httpGet(port: UInt16, path: String, timeoutSeconds: Int = 5) throws -> String {
     let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
     guard fd >= 0 else {

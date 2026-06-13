@@ -175,6 +175,7 @@ private struct PersistedSearchSettings: Codable {
     var visibleColumns: Set<ResultColumn>?
     var activeProfileID: String?
     var globalHotkeyChoice: GlobalHotkeyChoice?
+    var appShortcutSettings: AppShortcutSettings?
     var launchAtLogin: Bool?
 }
 
@@ -317,6 +318,7 @@ final class SearchStore: ObservableObject {
     @Published var indexProfiles: [IndexProfile] = []
     @Published var activeProfileID: String?
     @Published var globalHotkeyChoice: GlobalHotkeyChoice = .optionSpace
+    @Published var appShortcutSettings = AppShortcutSettings.defaults
     @Published var launchAtLogin = false
     @Published var fileListSources: [FileListSource] = []
     @Published var searchHistory: [SearchHistoryItem] = []
@@ -931,6 +933,14 @@ final class SearchStore: ObservableObject {
         statusText = choice == .disabled ? "Hotkey disabled" : "Hotkey: \(choice.displayName)"
     }
 
+    func setAppShortcutChoice(_ choice: AppShortcutChoice, for action: AppShortcutAction) {
+        appShortcutSettings.set(choice, for: action)
+        saveSettings()
+        statusText = choice == .disabled
+            ? "\(action.displayName) shortcut disabled"
+            : "\(action.displayName): \(choice.displayName)"
+    }
+
     func setLaunchAtLogin(_ enabled: Bool) {
         launchAtLogin = enabled
         saveSettings()
@@ -1343,6 +1353,7 @@ final class SearchStore: ObservableObject {
         searchOptions = settings.searchOptions
         activeProfileID = settings.activeProfileID
         globalHotkeyChoice = settings.globalHotkeyChoice ?? GlobalHotkeyChoice.recommended
+        appShortcutSettings = settings.appShortcutSettings ?? .defaults
         launchAtLogin = settings.launchAtLogin ?? false
         if let visibleColumns = settings.visibleColumns, !visibleColumns.isEmpty {
             self.visibleColumns = visibleColumns
@@ -1401,6 +1412,7 @@ final class SearchStore: ObservableObject {
             visibleColumns: visibleColumns,
             activeProfileID: activeProfileID,
             globalHotkeyChoice: globalHotkeyChoice,
+            appShortcutSettings: appShortcutSettings,
             launchAtLogin: launchAtLogin
         )
 

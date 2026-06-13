@@ -212,10 +212,19 @@ private struct UserFiltersMenu: View {
 }
 
 private struct MoreMenu: View {
+    @Environment(\.openSettings) private var openSettings
     @EnvironmentObject private var store: SearchStore
 
     var body: some View {
         Menu {
+            Button {
+                openSettings()
+            } label: {
+                Label("Settings", systemImage: "gearshape")
+            }
+
+            Divider()
+
             Menu("File Lists") {
                 Button {
                     store.importFileList()
@@ -390,6 +399,10 @@ private struct MoreMenu: View {
 
             Menu("Global Hotkey: \(store.globalHotkeyChoice.displayName)") {
                 GlobalHotkeyMenuContent()
+            }
+
+            Menu("Keyboard Shortcuts") {
+                AppShortcutMenuContent()
             }
 
             Menu("Diagnostics") {
@@ -653,6 +666,29 @@ private struct GlobalHotkeyMenuContent: View {
                     Text(choice.displayName)
                     if store.globalHotkeyChoice == choice {
                         Image(systemName: "checkmark")
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct AppShortcutMenuContent: View {
+    @EnvironmentObject private var store: SearchStore
+
+    var body: some View {
+        ForEach(AppShortcutAction.allCases) { action in
+            Menu("\(action.displayName): \(store.appShortcutSettings.choice(for: action).displayName)") {
+                ForEach(action.availableChoices) { choice in
+                    Button {
+                        store.setAppShortcutChoice(choice, for: action)
+                    } label: {
+                        HStack {
+                            Text(choice.displayName)
+                            if store.appShortcutSettings.choice(for: action) == choice {
+                                Image(systemName: "checkmark")
+                            }
+                        }
                     }
                 }
             }
