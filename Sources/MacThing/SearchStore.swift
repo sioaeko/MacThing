@@ -2346,20 +2346,20 @@ final class SearchStore: ObservableObject {
             return nil
         }
 
-        if activeFileListEntries.isEmpty,
-           let windowEntries = try? databaseWindowEntries(
+        if let windowEntries = try? databaseWindowEntries(
             request: request,
             indexURLs: indexURLs
            ),
            !windowEntries.isEmpty {
-            let windowResponse = SearchEngine.searchCandidateSubset(request: request, in: windowEntries)
+            let mergedEntries = mergeCandidateEntries(windowEntries, activeFileListEntries)
+            let windowResponse = SearchEngine.searchCandidateSubset(request: request, in: mergedEntries)
             return SearchResponse(
                 entries: windowResponse.entries,
                 totalMatches: effectiveIndexedCount,
                 warnings: windowResponse.warnings,
                 diagnostics: diagnostics(
                     source: .databaseWindow,
-                    searchedEntryCount: windowEntries.count,
+                    searchedEntryCount: mergedEntries.count,
                     candidateCount: windowEntries.count
                 )
             )
