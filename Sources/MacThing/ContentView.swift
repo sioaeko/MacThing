@@ -1065,6 +1065,17 @@ private struct StatusBar: View {
                     .lineLimit(1)
             }
 
+            if store.isSearching {
+                HStack(spacing: 5) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.55)
+                    Text("Searching")
+                        .lineLimit(1)
+                }
+                .foregroundStyle(.secondary)
+            }
+
             Text(optionSummary)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)

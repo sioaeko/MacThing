@@ -196,6 +196,7 @@ private final class QueryServiceState: @unchecked Sendable {
         var lastIndexedAt: Date?
         var statusText = ""
         var isIndexing = false
+        var isSearching = false
         var sortField: SearchSortField = .relevance
         var sortDirection: SearchSortDirection = .ascending
         var options = SearchOptions()
@@ -215,6 +216,7 @@ private final class QueryServiceState: @unchecked Sendable {
         lastIndexedAt: Date?,
         statusText: String,
         isIndexing: Bool,
+        isSearching: Bool,
         sortField: SearchSortField,
         sortDirection: SearchSortDirection,
         options: SearchOptions,
@@ -231,6 +233,7 @@ private final class QueryServiceState: @unchecked Sendable {
             lastIndexedAt: lastIndexedAt,
             statusText: statusText,
             isIndexing: isIndexing,
+            isSearching: isSearching,
             sortField: sortField,
             sortDirection: sortDirection,
             options: options,
@@ -251,6 +254,7 @@ private final class QueryServiceState: @unchecked Sendable {
             lastIndexedAt: current.lastIndexedAt,
             statusText: current.statusText,
             isIndexing: current.isIndexing,
+            isSearching: current.isSearching,
             lastSearch: current.lastSearchDiagnostics
         )
     }
@@ -309,6 +313,7 @@ final class SearchStore: ObservableObject {
     @Published var searchWarnings: [String] = []
     @Published var selectedPath: String?
     @Published var isIndexing = false
+    @Published var isSearching = false
     @Published var statusText = "Ready"
     @Published var lastIndexedAt: Date?
     @Published var lastSearchDiagnostics: SearchDiagnostics?
@@ -330,6 +335,7 @@ final class SearchStore: ObservableObject {
     @Published var userFilters: [UserSearchFilter] = []
 
     private var searchTask: Task<Void, Never>?
+    private var searchGeneration = 0
     private var historyTask: Task<Void, Never>?
     private var indexTask: Task<Void, Never>?
     private var loadIndexTask: Task<Void, Never>?
@@ -1348,12 +1354,16 @@ final class SearchStore: ObservableObject {
     }
 
     private func clearLoadedIndex(status: String) {
+        searchGeneration &+= 1
+        searchTask?.cancel()
+        searchTask = nil
         fileIndex.replaceAll([])
         rebuildEntriesFromIndexes()
         storedIndexedCount = entries.count
         results = []
         totalMatches = 0
         lastIndexedAt = nil
+        isSearching = false
         statusText = entries.isEmpty ? status : "\(entries.count.formatted()) items"
         updateQueryServiceState()
     }
@@ -1704,9 +1714,12 @@ final class SearchStore: ObservableObject {
     private func index(rootURL: URL) {
         loadIndexTask?.cancel()
         indexTask?.cancel()
+        searchGeneration &+= 1
         searchTask?.cancel()
+        searchTask = nil
 
         isIndexing = true
+        isSearching = false
         statusText = "Indexing..."
         results = []
         totalMatches = 0
@@ -2104,7 +2117,11 @@ final class SearchStore: ObservableObject {
     }
 
     private func scheduleSearch() {
+        searchGeneration &+= 1
+        let generation = searchGeneration
         searchTask?.cancel()
+        isSearching = true
+        updateQueryServiceState()
 
         let query = query
         let entries = entries
@@ -2119,6 +2136,9 @@ final class SearchStore: ObservableObject {
             .flatMap(\.entriesWithSourceMetadata)
         searchTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else {
+                return
+            }
 
             let worker = Task.detached(priority: .userInitiated) {
                 let effectiveQuery = Self.effectiveQuery(userQuery: query, filter: activeFilter)
@@ -2151,7 +2171,7 @@ final class SearchStore: ObservableObject {
                 worker.cancel()
             }
 
-            guard let self, !Task.isCancelled else {
+            guard let self, !Task.isCancelled, self.searchGeneration == generation else {
                 return
             }
 
@@ -2159,6 +2179,8 @@ final class SearchStore: ObservableObject {
             self.totalMatches = response.totalMatches
             self.searchWarnings = response.warnings
             self.lastSearchDiagnostics = response.diagnostics
+            self.isSearching = false
+            self.searchTask = nil
             self.updateQueryServiceState()
             if let selectedPath = self.selectedPath, !response.entries.contains(where: { $0.path == selectedPath }) {
                 self.selectedPath = nil
@@ -2201,6 +2223,7 @@ final class SearchStore: ObservableObject {
             lastIndexedAt: lastIndexedAt,
             statusText: statusText,
             isIndexing: isIndexing,
+            isSearching: isSearching,
             sortField: sortField,
             sortDirection: sortDirection,
             options: searchOptions,

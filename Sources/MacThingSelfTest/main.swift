@@ -4920,13 +4920,15 @@ do {
     let statusResponse = try httpGet(port: serverPort, path: "/api/status")
     if !(statusResponse.contains("\"indexedCount\":3") &&
         statusResponse.contains("\"statusText\":\"Ready\"") &&
-        statusResponse.contains("\"isIndexing\":false")) {
+        statusResponse.contains("\"isIndexing\":false") &&
+        statusResponse.contains("\"isSearching\":false")) {
         fputs("HTTP status response was:\n\(statusResponse)\n", stderr)
     }
     expect(
         statusResponse.contains("\"indexedCount\":3") &&
             statusResponse.contains("\"statusText\":\"Ready\"") &&
-            statusResponse.contains("\"isIndexing\":false"),
+            statusResponse.contains("\"isIndexing\":false") &&
+            statusResponse.contains("\"isSearching\":false"),
         "HTTP query service should return status JSON with indexing state"
     )
 
@@ -5048,7 +5050,8 @@ do {
                 resultCount: 0,
                 lastIndexedAt: nil,
                 statusText: "Ready",
-                isIndexing: false
+                isIndexing: false,
+                isSearching: true
             )
         }
     )
@@ -5079,7 +5082,8 @@ do {
     let statusResponse = try httpGet(port: serverPort, path: "/api/status", timeoutSeconds: 1)
     expect(
         statusResponse.contains("\"indexedCount\":3") &&
-            statusResponse.contains("\"statusText\":\"Ready\""),
+            statusResponse.contains("\"statusText\":\"Ready\"") &&
+            statusResponse.contains("\"isSearching\":true"),
         "HTTP query service should answer status while a search request is still running"
     )
 
