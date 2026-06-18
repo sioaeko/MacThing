@@ -591,41 +591,50 @@ public enum SearchEngine {
             if shouldCancel() {
                 return SearchResponse(entries: [], totalMatches: 0, warnings: parsed.warnings)
             }
-            let sorted = sort(
-                matches: entries.map { SearchMatch(score: 0, entry: $0) },
-                field: effectiveRequest.sortField == .relevance ? .dateModified : effectiveRequest.sortField,
-                direction: effectiveRequest.sortField == .relevance ? .descending : effectiveRequest.sortDirection
+            let field: SearchSortField = effectiveRequest.sortField == .relevance
+                ? .dateModified
+                : effectiveRequest.sortField
+            let direction: SearchSortDirection = effectiveRequest.sortField == .relevance
+                ? .descending
+                : effectiveRequest.sortDirection
+            var resultWindow = MatchWindow(
+                request: effectiveRequest,
+                field: field,
+                direction: direction
             )
+            for (index, entry) in entries.enumerated() {
+                if index.isMultiple(of: 1_024), shouldCancel() {
+                    return SearchResponse(entries: [], totalMatches: 0, warnings: parsed.warnings)
+                }
+                resultWindow.append(SearchMatch(score: 0, entry: entry))
+            }
             return SearchResponse(
-                entries: windowedEntries(from: sorted, request: effectiveRequest),
-                totalMatches: sorted.count,
+                entries: resultWindow.windowedEntries(),
+                totalMatches: entries.count,
                 warnings: parsed.warnings
             )
         }
 
-        var matches: [SearchMatch] = []
-        matches.reserveCapacity(min(
-            entries.count,
-            max(effectiveRequest.limit + effectiveRequest.offset, effectiveRequest.limit) * 4
-        ))
+        var resultWindow = MatchWindow(
+            request: effectiveRequest,
+            field: effectiveRequest.sortField,
+            direction: effectiveRequest.sortDirection
+        )
+        var totalMatches = 0
 
         for (index, entry) in entries.enumerated() {
             if index.isMultiple(of: 1_024), shouldCancel() {
                 return SearchResponse(entries: [], totalMatches: 0, warnings: parsed.warnings)
             }
             if let score = parsed.score(entry: entry, options: request.options, context: context) {
-                matches.append(SearchMatch(score: score, entry: entry))
+                totalMatches += 1
+                resultWindow.append(SearchMatch(score: score, entry: entry))
             }
         }
 
-        let sorted = sort(
-            matches: matches,
-            field: effectiveRequest.sortField,
-            direction: effectiveRequest.sortDirection
-        )
         return SearchResponse(
-            entries: windowedEntries(from: sorted, request: effectiveRequest),
-            totalMatches: sorted.count,
+            entries: resultWindow.windowedEntries(),
+            totalMatches: totalMatches,
             warnings: parsed.warnings
         )
     }
@@ -645,13 +654,6 @@ public enum SearchEngine {
             sortDirection: parsed.sortDirectionOverride ?? request.sortDirection,
             options: request.options
         )
-    }
-
-    private static func windowedEntries(from sorted: [SearchMatch], request: SearchRequest) -> [FileEntry] {
-        guard request.offset < sorted.count else {
-            return []
-        }
-        return Array(sorted.dropFirst(request.offset).prefix(request.limit).map(\.entry))
     }
 
     public static func candidateHint(for request: SearchRequest) -> SearchCandidateHint {
@@ -1438,13 +1440,31 @@ public enum SearchEngine {
         field: SearchSortField,
         direction: SearchSortDirection
     ) -> [SearchMatch] {
-        matches.sorted { lhs, rhs in
-            let comparison = compare(lhs.entry, rhs.entry, by: field, lhsScore: lhs.score, rhsScore: rhs.score)
-            if comparison == .orderedSame {
-                return compare(lhs.entry, rhs.entry, by: .name, lhsScore: lhs.score, rhsScore: rhs.score) == .orderedAscending
-            }
-            return direction == .ascending ? comparison == .orderedAscending : comparison == .orderedDescending
+        matches.sorted {
+            isOrdered($0, before: $1, field: field, direction: direction)
         }
+    }
+
+    private static func isOrdered(
+        _ lhs: SearchMatch,
+        before rhs: SearchMatch,
+        field: SearchSortField,
+        direction: SearchSortDirection
+    ) -> Bool {
+        let comparison = compare(lhs.entry, rhs.entry, by: field, lhsScore: lhs.score, rhsScore: rhs.score)
+        if comparison == .orderedSame {
+            return compare(lhs.entry, rhs.entry, by: .name, lhsScore: lhs.score, rhsScore: rhs.score) == .orderedAscending
+        }
+        return direction == .ascending ? comparison == .orderedAscending : comparison == .orderedDescending
+    }
+
+    private static func isWorse(
+        _ lhs: SearchMatch,
+        than rhs: SearchMatch,
+        field: SearchSortField,
+        direction: SearchSortDirection
+    ) -> Bool {
+        isOrdered(rhs, before: lhs, field: field, direction: direction)
     }
 
     private static func compare(
@@ -1552,6 +1572,90 @@ public enum SearchEngine {
             return .orderedDescending
         case (nil, nil):
             return .orderedSame
+        }
+    }
+
+    private struct MatchWindow {
+        private let request: SearchRequest
+        private let field: SearchSortField
+        private let direction: SearchSortDirection
+        private let capacity: Int
+        private var matches: [SearchMatch] = []
+
+        init(request: SearchRequest, field: SearchSortField, direction: SearchSortDirection) {
+            self.request = request
+            self.field = field
+            self.direction = direction
+            self.capacity = request.offset > Int.max - request.limit
+                ? Int.max
+                : request.offset + request.limit
+            matches.reserveCapacity(min(self.capacity, 1_024))
+        }
+
+        mutating func append(_ match: SearchMatch) {
+            guard capacity > 0 else {
+                return
+            }
+
+            if matches.count < capacity {
+                matches.append(match)
+                siftUp(from: matches.count - 1)
+                return
+            }
+
+            guard let root = matches.first,
+                  SearchEngine.isOrdered(match, before: root, field: field, direction: direction) else {
+                return
+            }
+
+            matches[0] = match
+            siftDown(from: 0)
+        }
+
+        func windowedEntries() -> [FileEntry] {
+            guard request.offset < matches.count else {
+                return []
+            }
+
+            let sorted = SearchEngine.sort(matches: matches, field: field, direction: direction)
+            return Array(sorted.dropFirst(request.offset).prefix(request.limit).map(\.entry))
+        }
+
+        private mutating func siftUp(from index: Int) {
+            var child = index
+            while child > 0 {
+                let parent = (child - 1) / 2
+                guard SearchEngine.isWorse(matches[child], than: matches[parent], field: field, direction: direction) else {
+                    return
+                }
+                matches.swapAt(child, parent)
+                child = parent
+            }
+        }
+
+        private mutating func siftDown(from index: Int) {
+            var parent = index
+            while true {
+                let leftChild = parent * 2 + 1
+                let rightChild = leftChild + 1
+                var worst = parent
+
+                if leftChild < matches.count,
+                   SearchEngine.isWorse(matches[leftChild], than: matches[worst], field: field, direction: direction) {
+                    worst = leftChild
+                }
+
+                if rightChild < matches.count,
+                   SearchEngine.isWorse(matches[rightChild], than: matches[worst], field: field, direction: direction) {
+                    worst = rightChild
+                }
+
+                guard worst != parent else {
+                    return
+                }
+                matches.swapAt(parent, worst)
+                parent = worst
+            }
         }
     }
 }

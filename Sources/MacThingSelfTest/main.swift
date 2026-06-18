@@ -623,6 +623,32 @@ expect(
     "count: should limit empty-search result windows while preserving total match counts"
 )
 
+let manyRecentEntries = (0..<2_000).map { index in
+    FileEntry(
+        path: "/bulk/item-\(index).txt",
+        name: "item-\(index).txt",
+        parent: "/bulk",
+        kind: .file,
+        byteSize: Int64(index),
+        modifiedAt: Date(timeIntervalSince1970: TimeInterval(index))
+    )
+}
+let boundedRecentResults = SearchEngine.search(
+    request: SearchRequest(query: "", limit: 5),
+    in: manyRecentEntries
+)
+expect(
+    boundedRecentResults.entries.map(\.path) == [
+        "/bulk/item-1999.txt",
+        "/bulk/item-1998.txt",
+        "/bulk/item-1997.txt",
+        "/bulk/item-1996.txt",
+        "/bulk/item-1995.txt"
+    ] &&
+        boundedRecentResults.totalMatches == manyRecentEntries.count,
+    "large empty searches should preserve total matches while returning the bounded recency window"
+)
+
 let compactMatch = FileEntry(
     path: "/Users/me/Screenshots/QuarterlyRoadmap.png",
     name: "QuarterlyRoadmap.png",
