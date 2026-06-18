@@ -1917,6 +1917,11 @@ final class SearchStore: ObservableObject {
 
         if changes.contains(where: \.requiresFullScan) {
             let reason = changes.compactMap(\.fullScanReason).first ?? "Filesystem full scan"
+            if changes.contains(where: \.isEventHistoryLoss), !entries.isEmpty {
+                statusText = "Saved index retained; \(reason). Reindex when ready."
+                updateQueryServiceState()
+                return
+            }
             reindexProfile(profileID: profileID, reason: "Full rescan: \(reason)")
             return
         }

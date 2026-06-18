@@ -14,6 +14,12 @@ struct FileSystemChange: Sendable {
             contains(kFSEventStreamEventFlagEventIdsWrapped)
     }
 
+    var isEventHistoryLoss: Bool {
+        contains(kFSEventStreamEventFlagKernelDropped) ||
+            contains(kFSEventStreamEventFlagUserDropped) ||
+            contains(kFSEventStreamEventFlagEventIdsWrapped)
+    }
+
     var fullScanReason: String? {
         if contains(kFSEventStreamEventFlagKernelDropped) ||
             contains(kFSEventStreamEventFlagUserDropped) {
