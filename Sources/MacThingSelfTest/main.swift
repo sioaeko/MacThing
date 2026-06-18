@@ -648,6 +648,11 @@ expect(
         boundedRecentResults.totalMatches == manyRecentEntries.count,
     "large empty searches should preserve total matches while returning the bounded recency window"
 )
+expect(
+    boundedRecentResults.diagnostics?.source == .memory &&
+        boundedRecentResults.diagnostics?.searchedEntryCount == manyRecentEntries.count,
+    "search responses should report memory search diagnostics"
+)
 
 let compactMatch = FileEntry(
     path: "/Users/me/Screenshots/QuarterlyRoadmap.png",
@@ -4920,8 +4925,10 @@ do {
     }
     expect(
         searchResponse.contains("\"totalMatches\":3") &&
-            searchResponse.contains("Launch"),
-        "HTTP query service should return search JSON"
+            searchResponse.contains("Launch") &&
+            searchResponse.contains("\"diagnostics\"") &&
+            searchResponse.contains("\"source\":\"memory\""),
+        "HTTP query service should return search JSON with diagnostics"
     )
 
     let regexSearchResponse = try httpGet(port: serverPort, path: "/api/search?q=%5ELaunch&regex=true&limit=5")

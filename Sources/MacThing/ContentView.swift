@@ -1051,6 +1051,12 @@ private struct StatusBar: View {
                     .lineLimit(1)
             }
 
+            if let searchSummary {
+                Text(searchSummary)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
             Text(optionSummary)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -1064,6 +1070,20 @@ private struct StatusBar: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 7)
         .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private var searchSummary: String? {
+        guard let diagnostics = store.lastSearchDiagnostics else {
+            return nil
+        }
+
+        let duration = diagnostics.durationMilliseconds < 10
+            ? String(format: "%.1f ms", diagnostics.durationMilliseconds)
+            : "\(Int(diagnostics.durationMilliseconds.rounded())) ms"
+        if let candidateCount = diagnostics.candidateCount {
+            return "\(diagnostics.source.displayName) | \(duration) | \(candidateCount.formatted()) candidates"
+        }
+        return "\(diagnostics.source.displayName) | \(duration)"
     }
 
     private var optionSummary: String {

@@ -457,11 +457,63 @@ public struct SearchResponse: Sendable {
     public let entries: [FileEntry]
     public let totalMatches: Int
     public let warnings: [String]
+    public let diagnostics: SearchDiagnostics?
 
-    public init(entries: [FileEntry], totalMatches: Int, warnings: [String] = []) {
+    public init(
+        entries: [FileEntry],
+        totalMatches: Int,
+        warnings: [String] = [],
+        diagnostics: SearchDiagnostics? = nil
+    ) {
         self.entries = entries
         self.totalMatches = totalMatches
         self.warnings = warnings
+        self.diagnostics = diagnostics
+    }
+
+    public func withDiagnostics(_ diagnostics: SearchDiagnostics) -> SearchResponse {
+        SearchResponse(
+            entries: entries,
+            totalMatches: totalMatches,
+            warnings: warnings,
+            diagnostics: diagnostics
+        )
+    }
+}
+
+public enum SearchSource: String, Codable, Sendable {
+    case memory
+    case databaseWindow
+    case databaseCandidates
+
+    public var displayName: String {
+        switch self {
+        case .memory:
+            return "Memory"
+        case .databaseWindow:
+            return "SQLite Window"
+        case .databaseCandidates:
+            return "SQLite Candidates"
+        }
+    }
+}
+
+public struct SearchDiagnostics: Codable, Sendable {
+    public let source: SearchSource
+    public let durationMilliseconds: Double
+    public let searchedEntryCount: Int
+    public let candidateCount: Int?
+
+    public init(
+        source: SearchSource,
+        durationMilliseconds: Double,
+        searchedEntryCount: Int,
+        candidateCount: Int? = nil
+    ) {
+        self.source = source
+        self.durationMilliseconds = durationMilliseconds
+        self.searchedEntryCount = searchedEntryCount
+        self.candidateCount = candidateCount
     }
 }
 
@@ -583,6 +635,15 @@ public enum SearchEngine {
         shouldCancel: @Sendable () -> Bool,
         buildFullContext: Bool
     ) -> SearchResponse {
+        let startedAt = Date()
+        func diagnostics(searchedEntryCount: Int = entries.count) -> SearchDiagnostics {
+            SearchDiagnostics(
+                source: .memory,
+                durationMilliseconds: Date().timeIntervalSince(startedAt) * 1_000,
+                searchedEntryCount: searchedEntryCount
+            )
+        }
+
         let parsed = SearchQueryParser.parse(request.query)
         let effectiveRequest = applyingQueryOverrides(request, parsed)
         let context = SearchContext(entries: entries, options: request.options, buildFullIndexes: buildFullContext)
@@ -611,7 +672,8 @@ public enum SearchEngine {
             return SearchResponse(
                 entries: resultWindow.windowedEntries(),
                 totalMatches: entries.count,
-                warnings: parsed.warnings
+                warnings: parsed.warnings,
+                diagnostics: diagnostics()
             )
         }
 
@@ -635,7 +697,8 @@ public enum SearchEngine {
         return SearchResponse(
             entries: resultWindow.windowedEntries(),
             totalMatches: totalMatches,
-            warnings: parsed.warnings
+            warnings: parsed.warnings,
+            diagnostics: diagnostics()
         )
     }
 

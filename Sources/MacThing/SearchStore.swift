@@ -199,6 +199,7 @@ private final class QueryServiceState: @unchecked Sendable {
         var sortField: SearchSortField = .relevance
         var sortDirection: SearchSortDirection = .ascending
         var options = SearchOptions()
+        var lastSearchDiagnostics: SearchDiagnostics?
     }
 
     private let lock = NSLock()
@@ -216,7 +217,8 @@ private final class QueryServiceState: @unchecked Sendable {
         isIndexing: Bool,
         sortField: SearchSortField,
         sortDirection: SearchSortDirection,
-        options: SearchOptions
+        options: SearchOptions,
+        lastSearchDiagnostics: SearchDiagnostics?
     ) {
         lock.lock()
         snapshot = Snapshot(
@@ -231,7 +233,8 @@ private final class QueryServiceState: @unchecked Sendable {
             isIndexing: isIndexing,
             sortField: sortField,
             sortDirection: sortDirection,
-            options: options
+            options: options,
+            lastSearchDiagnostics: lastSearchDiagnostics
         )
         lock.unlock()
     }
@@ -247,7 +250,8 @@ private final class QueryServiceState: @unchecked Sendable {
             resultCount: current.resultCount,
             lastIndexedAt: current.lastIndexedAt,
             statusText: current.statusText,
-            isIndexing: current.isIndexing
+            isIndexing: current.isIndexing,
+            lastSearch: current.lastSearchDiagnostics
         )
     }
 
@@ -307,6 +311,7 @@ final class SearchStore: ObservableObject {
     @Published var isIndexing = false
     @Published var statusText = "Ready"
     @Published var lastIndexedAt: Date?
+    @Published var lastSearchDiagnostics: SearchDiagnostics?
     @Published var activeFilter: ResultFilter = .all
     @Published var sortField: SearchSortField = .relevance
     @Published var sortDirection: SearchSortDirection = .ascending
@@ -2139,6 +2144,7 @@ final class SearchStore: ObservableObject {
             self.results = response.entries
             self.totalMatches = response.totalMatches
             self.searchWarnings = response.warnings
+            self.lastSearchDiagnostics = response.diagnostics
             self.updateQueryServiceState()
             if let selectedPath = self.selectedPath, !response.entries.contains(where: { $0.path == selectedPath }) {
                 self.selectedPath = nil
@@ -2183,7 +2189,8 @@ final class SearchStore: ObservableObject {
             isIndexing: isIndexing,
             sortField: sortField,
             sortDirection: sortDirection,
-            options: searchOptions
+            options: searchOptions,
+            lastSearchDiagnostics: lastSearchDiagnostics
         )
     }
 
@@ -2214,6 +2221,20 @@ final class SearchStore: ObservableObject {
         indexURLs: [URL],
         activeFileListEntries: [FileEntry]
     ) -> SearchResponse? {
+        let startedAt = Date()
+        func diagnostics(
+            source: SearchSource,
+            searchedEntryCount: Int,
+            candidateCount: Int?
+        ) -> SearchDiagnostics {
+            SearchDiagnostics(
+                source: source,
+                durationMilliseconds: Date().timeIntervalSince(startedAt) * 1_000,
+                searchedEntryCount: searchedEntryCount,
+                candidateCount: candidateCount
+            )
+        }
+
         let effectiveIndexedCount = max(entries.count, indexedCount)
         guard effectiveIndexedCount > 25_000 || (entries.isEmpty && !indexURLs.isEmpty) else {
             return nil
@@ -2229,7 +2250,12 @@ final class SearchStore: ObservableObject {
             return SearchResponse(
                 entries: windowResponse.entries,
                 totalMatches: effectiveIndexedCount,
-                warnings: windowResponse.warnings
+                warnings: windowResponse.warnings,
+                diagnostics: diagnostics(
+                    source: .databaseWindow,
+                    searchedEntryCount: windowEntries.count,
+                    candidateCount: windowEntries.count
+                )
             )
         }
 
@@ -2237,9 +2263,16 @@ final class SearchStore: ObservableObject {
             request: request,
             indexURLs: indexURLs
         ) {
+            let mergedEntries = mergeCandidateEntries(candidateEntries, activeFileListEntries)
             return SearchEngine.searchCandidateSubset(
                 request: request,
-                in: mergeCandidateEntries(candidateEntries, activeFileListEntries)
+                in: mergedEntries
+            ).withDiagnostics(
+                diagnostics(
+                    source: .databaseCandidates,
+                    searchedEntryCount: mergedEntries.count,
+                    candidateCount: candidateEntries.count
+                )
             )
         }
 

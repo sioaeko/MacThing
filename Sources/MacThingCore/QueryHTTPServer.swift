@@ -9,6 +9,7 @@ public final class QueryHTTPServer: @unchecked Sendable {
         public let lastIndexedAt: Date?
         public let statusText: String
         public let isIndexing: Bool
+        public let lastSearch: SearchDiagnostics?
 
         public init(
             rootPath: String,
@@ -16,7 +17,8 @@ public final class QueryHTTPServer: @unchecked Sendable {
             resultCount: Int,
             lastIndexedAt: Date?,
             statusText: String = "",
-            isIndexing: Bool = false
+            isIndexing: Bool = false,
+            lastSearch: SearchDiagnostics? = nil
         ) {
             self.rootPath = rootPath
             self.indexedCount = indexedCount
@@ -24,6 +26,7 @@ public final class QueryHTTPServer: @unchecked Sendable {
             self.lastIndexedAt = lastIndexedAt
             self.statusText = statusText
             self.isIndexing = isIndexing
+            self.lastSearch = lastSearch
         }
     }
 
@@ -33,6 +36,7 @@ public final class QueryHTTPServer: @unchecked Sendable {
         let limit: Int
         let offset: Int
         let warnings: [String]
+        let diagnostics: SearchDiagnostics?
         let sortField: SearchSortField
         let sortDirection: SearchSortDirection
         let results: [FileEntry]
@@ -268,6 +272,7 @@ public final class QueryHTTPServer: @unchecked Sendable {
                     limit: parsedRequest.request.limit,
                     offset: parsedRequest.request.offset,
                     warnings: response.warnings,
+                    diagnostics: response.diagnostics,
                     sortField: parsedRequest.request.sortField,
                     sortDirection: parsedRequest.request.sortDirection,
                     results: response.entries,
