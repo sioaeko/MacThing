@@ -119,7 +119,7 @@ private struct CompactSearchView: View {
                     .padding(.vertical, 6)
                 }
 
-                if store.isIndexing {
+                if store.isIndexing || store.isLoadingIndex {
                     ProgressView()
                         .controlSize(.large)
                 } else if store.results.isEmpty {

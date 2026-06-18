@@ -4939,7 +4939,8 @@ do {
                 resultCount: 0,
                 lastIndexedAt: nil,
                 statusText: "Ready",
-                isIndexing: false
+                isIndexing: false,
+                isLoadingIndex: true
             )
         }
     )
@@ -4953,6 +4954,7 @@ do {
     if !(statusResponse.contains("\"indexedCount\":3") &&
         statusResponse.contains("\"statusText\":\"Ready\"") &&
         statusResponse.contains("\"isIndexing\":false") &&
+        statusResponse.contains("\"isLoadingIndex\":true") &&
         statusResponse.contains("\"isSearching\":false")) {
         fputs("HTTP status response was:\n\(statusResponse)\n", stderr)
     }
@@ -4960,6 +4962,7 @@ do {
         statusResponse.contains("\"indexedCount\":3") &&
             statusResponse.contains("\"statusText\":\"Ready\"") &&
             statusResponse.contains("\"isIndexing\":false") &&
+            statusResponse.contains("\"isLoadingIndex\":true") &&
             statusResponse.contains("\"isSearching\":false"),
         "HTTP query service should return status JSON with indexing state"
     )
@@ -5083,6 +5086,7 @@ do {
                 lastIndexedAt: nil,
                 statusText: "Ready",
                 isIndexing: false,
+                isLoadingIndex: false,
                 isSearching: true
             )
         }

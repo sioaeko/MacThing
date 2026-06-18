@@ -204,6 +204,7 @@ private final class QueryServiceState: @unchecked Sendable {
         var lastIndexedAt: Date?
         var statusText = ""
         var isIndexing = false
+        var isLoadingIndex = false
         var isSearching = false
         var sortField: SearchSortField = .relevance
         var sortDirection: SearchSortDirection = .ascending
@@ -224,6 +225,7 @@ private final class QueryServiceState: @unchecked Sendable {
         lastIndexedAt: Date?,
         statusText: String,
         isIndexing: Bool,
+        isLoadingIndex: Bool,
         isSearching: Bool,
         sortField: SearchSortField,
         sortDirection: SearchSortDirection,
@@ -241,6 +243,7 @@ private final class QueryServiceState: @unchecked Sendable {
             lastIndexedAt: lastIndexedAt,
             statusText: statusText,
             isIndexing: isIndexing,
+            isLoadingIndex: isLoadingIndex,
             isSearching: isSearching,
             sortField: sortField,
             sortDirection: sortDirection,
@@ -262,6 +265,7 @@ private final class QueryServiceState: @unchecked Sendable {
             lastIndexedAt: current.lastIndexedAt,
             statusText: current.statusText,
             isIndexing: current.isIndexing,
+            isLoadingIndex: current.isLoadingIndex,
             isSearching: current.isSearching,
             lastSearch: current.lastSearchDiagnostics
         )
@@ -321,6 +325,7 @@ final class SearchStore: ObservableObject {
     @Published var searchWarnings: [String] = []
     @Published var selectedPath: String?
     @Published var isIndexing = false
+    @Published var isLoadingIndex = false
     @Published var isSearching = false
     @Published var statusText = "Ready"
     @Published var lastIndexedAt: Date?
@@ -490,6 +495,7 @@ final class SearchStore: ObservableObject {
         ensureActiveProfile()
         storedIndexedCount = Self.databaseEntryCount(indexURLs: enabledProfileIndexURLs)
         statusText = "Loading saved index..."
+        isLoadingIndex = true
         refreshVolumes()
         refreshPermissionDiagnostics()
         refreshLaunchAtLoginState()
@@ -1237,6 +1243,9 @@ final class SearchStore: ObservableObject {
 
     private func loadPersistedIndex() {
         loadIndexTask?.cancel()
+        isLoadingIndex = true
+        statusText = "Loading saved index..."
+        updateQueryServiceState()
         let state = Self.loadPersistedIndexState(
             indexProfiles: indexProfiles,
             activeProfileID: activeProfileID,
@@ -1247,6 +1256,9 @@ final class SearchStore: ObservableObject {
 
     private func loadPersistedIndexInBackground() {
         loadIndexTask?.cancel()
+        isLoadingIndex = true
+        statusText = "Loading saved index..."
+        updateQueryServiceState()
 
         let indexProfiles = indexProfiles
         let activeProfileID = activeProfileID
@@ -1349,6 +1361,7 @@ final class SearchStore: ObservableObject {
 
     private func applyPersistedIndexState(_ state: PersistedIndexLoadState) {
         auxiliaryProfileEntriesByID = state.auxiliaryProfileEntriesByID
+        isLoadingIndex = false
 
         guard let snapshot = state.activeSnapshot else {
             clearLoadedIndex(status: state.activeIndexLoadFailed ? "Saved index could not be loaded" : "No saved index")
@@ -1376,6 +1389,7 @@ final class SearchStore: ObservableObject {
         results = []
         totalMatches = 0
         lastIndexedAt = nil
+        isLoadingIndex = false
         isSearching = false
         statusText = entries.isEmpty ? status : "\(entries.count.formatted()) items"
         updateQueryServiceState()
@@ -2258,6 +2272,7 @@ final class SearchStore: ObservableObject {
             lastIndexedAt: lastIndexedAt,
             statusText: statusText,
             isIndexing: isIndexing,
+            isLoadingIndex: isLoadingIndex,
             isSearching: isSearching,
             sortField: sortField,
             sortDirection: sortDirection,

@@ -9,6 +9,7 @@ public final class QueryHTTPServer: @unchecked Sendable {
         public let lastIndexedAt: Date?
         public let statusText: String
         public let isIndexing: Bool
+        public let isLoadingIndex: Bool
         public let isSearching: Bool
         public let lastSearch: SearchDiagnostics?
 
@@ -19,6 +20,7 @@ public final class QueryHTTPServer: @unchecked Sendable {
             lastIndexedAt: Date?,
             statusText: String = "",
             isIndexing: Bool = false,
+            isLoadingIndex: Bool = false,
             isSearching: Bool = false,
             lastSearch: SearchDiagnostics? = nil
         ) {
@@ -28,6 +30,7 @@ public final class QueryHTTPServer: @unchecked Sendable {
             self.lastIndexedAt = lastIndexedAt
             self.statusText = statusText
             self.isIndexing = isIndexing
+            self.isLoadingIndex = isLoadingIndex
             self.isSearching = isSearching
             self.lastSearch = lastSearch
         }

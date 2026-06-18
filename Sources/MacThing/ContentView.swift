@@ -825,9 +825,8 @@ private struct ResultArea: View {
                 .padding(.vertical, 4)
             }
 
-            if store.isIndexing {
-                ProgressView()
-                    .controlSize(.large)
+            if store.isIndexing || store.isLoadingIndex {
+                LoadingIndexView()
             } else if store.entries.isEmpty {
                 EmptyIndexView()
             } else if store.results.isEmpty {
@@ -1007,6 +1006,18 @@ private struct FileIcon: View {
     }
 }
 
+private struct LoadingIndexView: View {
+    var body: some View {
+        VStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.large)
+            Text("Loading index")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
 private struct EmptyIndexView: View {
     var body: some View {
         VStack(spacing: 10) {
@@ -1062,6 +1073,17 @@ private struct StatusBar: View {
                 Text(store.permissionIssues.first?.title ?? "Permissions")
                     .foregroundStyle(.orange)
                     .lineLimit(1)
+            }
+
+            if store.isLoadingIndex {
+                HStack(spacing: 5) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.55)
+                    Text("Loading index")
+                        .lineLimit(1)
+                }
+                .foregroundStyle(.secondary)
             }
 
             if let searchSummary {
