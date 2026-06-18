@@ -44,19 +44,45 @@ public struct VolumeProfile: Codable, Hashable, Identifiable, Sendable {
         if isInternal {
             return "Internal"
         }
-        return "Local"
+        return "External"
     }
 
     public var menuTitle: String {
-        "\(displayName) (\(locationDescription)) - \(path)"
+        let details = [locationDescription, capacityDescription]
+            .compactMap { $0 }
+            .joined(separator: ", ")
+        return "\(displayName) (\(details)) - \(path)"
     }
 
     public var requiresIndexConfirmation: Bool {
-        !isLocal
+        !isLocal || !isInternal || isRemovable
     }
 
     public var indexConfirmationMessage: String {
-        "\(displayName) is a network volume. Choose it again to index."
+        switch locationDescription {
+        case "Network":
+            return "\(displayName) is a network volume and is never indexed automatically. Choose it again to index."
+        case "Removable":
+            return "\(displayName) is a removable volume. Choose it again to index."
+        case "External":
+            return "\(displayName) is an external volume. Choose it again to index."
+        default:
+            return "\(displayName) needs confirmation. Choose it again to index."
+        }
+    }
+
+    public var capacityDescription: String? {
+        guard let capacity else {
+            return nil
+        }
+
+        let capacityText = ByteCountFormatter.string(fromByteCount: capacity, countStyle: .file)
+        guard let availableCapacity else {
+            return capacityText
+        }
+
+        let availableText = ByteCountFormatter.string(fromByteCount: availableCapacity, countStyle: .file)
+        return "\(availableText) free of \(capacityText)"
     }
 }
 

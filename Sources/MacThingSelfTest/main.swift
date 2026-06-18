@@ -4192,8 +4192,40 @@ let networkVolume = VolumeProfile(
 expect(
     networkVolume.requiresIndexConfirmation &&
         networkVolume.locationDescription == "Network" &&
+        networkVolume.indexConfirmationMessage.contains("never indexed automatically") &&
         networkVolume.indexConfirmationMessage.contains("Choose it again"),
     "network volume profiles should require explicit indexing confirmation"
+)
+let externalVolume = VolumeProfile(
+    id: "usb-ssd",
+    name: "USB SSD",
+    path: "/Volumes/USB SSD",
+    isLocal: true,
+    isInternal: false,
+    isRemovable: true,
+    capacity: 1_000_000_000,
+    availableCapacity: 250_000_000
+)
+expect(
+    externalVolume.requiresIndexConfirmation &&
+        externalVolume.locationDescription == "Removable" &&
+        externalVolume.menuTitle.contains("free of"),
+    "removable volume profiles should require explicit indexing confirmation and show capacity"
+)
+let internalVolume = VolumeProfile(
+    id: "system",
+    name: "System",
+    path: "/",
+    isLocal: true,
+    isInternal: true,
+    isRemovable: false,
+    capacity: nil,
+    availableCapacity: nil
+)
+expect(
+    !internalVolume.requiresIndexConfirmation &&
+        internalVolume.locationDescription == "Internal",
+    "internal volume profiles should not require the extra volume confirmation"
 )
 
 do {

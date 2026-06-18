@@ -320,9 +320,7 @@ private struct MoreMenu: View {
                         } label: {
                             Label(
                                 profile.menuTitle,
-                                systemImage: profile.requiresIndexConfirmation
-                                    ? "exclamationmark.triangle"
-                                    : "externaldrive"
+                                systemImage: volumeIconName(for: profile)
                             )
                         }
                     }
@@ -440,6 +438,13 @@ private struct MoreMenu: View {
             ToolbarIcon(systemName: "ellipsis.circle")
         }
         .help("More")
+    }
+
+    private func volumeIconName(for profile: VolumeProfile) -> String {
+        if profile.requiresIndexConfirmation {
+            return "exclamationmark.triangle"
+        }
+        return profile.isInternal ? "internaldrive" : "externaldrive"
     }
 }
 
