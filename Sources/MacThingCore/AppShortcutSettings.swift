@@ -30,6 +30,25 @@ public enum AppShortcutAction: String, Codable, CaseIterable, Identifiable, Send
         }
     }
 
+    public var settingDetail: String {
+        switch self {
+        case .quickSearch:
+            return "Open the floating search palette"
+        case .showWindow:
+            return "Bring the main MacThing window forward"
+        case .reindex:
+            return "Rebuild the enabled indexes"
+        case .toggleMatchPath:
+            return "Switch path matching on or off"
+        case .toggleFuzzyMatching:
+            return "Switch fuzzy matching on or off"
+        case .toggleCaseSensitive:
+            return "Switch case-sensitive matching on or off"
+        case .exportVisibleResults:
+            return "Export the current result list"
+        }
+    }
+
     public var availableChoices: [AppShortcutChoice] {
         switch self {
         case .quickSearch:

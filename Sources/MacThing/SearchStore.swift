@@ -946,6 +946,20 @@ final class SearchStore: ObservableObject {
             : "\(action.displayName): \(choice.displayName)"
     }
 
+    func resetShortcutSettings() {
+        let previousChoice = globalHotkeyChoice
+        if globalHotkeyController?.register(GlobalHotkeyChoice.recommended) == false {
+            _ = globalHotkeyController?.register(previousChoice)
+            statusText = "Hotkey unavailable"
+            return
+        }
+
+        globalHotkeyChoice = GlobalHotkeyChoice.recommended
+        appShortcutSettings = .defaults
+        saveSettings()
+        statusText = "Shortcuts reset"
+    }
+
     func setLaunchAtLogin(_ enabled: Bool) {
         launchAtLogin = enabled
         saveSettings()

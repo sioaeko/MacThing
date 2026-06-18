@@ -677,6 +677,14 @@ struct AppShortcutMenuContent: View {
     @EnvironmentObject private var store: SearchStore
 
     var body: some View {
+        Button {
+            store.resetShortcutSettings()
+        } label: {
+            Label("Reset Defaults", systemImage: "arrow.counterclockwise")
+        }
+
+        Divider()
+
         ForEach(AppShortcutAction.allCases) { action in
             Menu("\(action.displayName): \(store.appShortcutSettings.choice(for: action).displayName)") {
                 ForEach(action.availableChoices) { choice in

@@ -51,6 +51,17 @@ expect(
     "app shortcut settings should clear duplicate command mappings"
 )
 
+for action in AppShortcutAction.allCases {
+    expect(
+        action.availableChoices.contains(defaultShortcuts.choice(for: action)),
+        "default shortcut should be selectable for \(action.rawValue)"
+    )
+    expect(
+        action.availableChoices.contains(.disabled),
+        "shortcut action should always allow disabling \(action.rawValue)"
+    )
+}
+
 func httpGet(port: UInt16, path: String, timeoutSeconds: Int = 5) throws -> String {
     let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
     guard fd >= 0 else {
