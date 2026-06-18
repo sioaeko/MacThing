@@ -206,6 +206,7 @@ private final class QueryServiceState: @unchecked Sendable {
         var isIndexing = false
         var isLoadingIndex = false
         var isSearching = false
+        var indexFreshnessWarning: String?
         var sortField: SearchSortField = .relevance
         var sortDirection: SearchSortDirection = .ascending
         var options = SearchOptions()
@@ -227,6 +228,7 @@ private final class QueryServiceState: @unchecked Sendable {
         isIndexing: Bool,
         isLoadingIndex: Bool,
         isSearching: Bool,
+        indexFreshnessWarning: String?,
         sortField: SearchSortField,
         sortDirection: SearchSortDirection,
         options: SearchOptions,
@@ -245,6 +247,7 @@ private final class QueryServiceState: @unchecked Sendable {
             isIndexing: isIndexing,
             isLoadingIndex: isLoadingIndex,
             isSearching: isSearching,
+            indexFreshnessWarning: indexFreshnessWarning,
             sortField: sortField,
             sortDirection: sortDirection,
             options: options,
@@ -267,6 +270,7 @@ private final class QueryServiceState: @unchecked Sendable {
             isIndexing: current.isIndexing,
             isLoadingIndex: current.isLoadingIndex,
             isSearching: current.isSearching,
+            indexFreshnessWarning: current.indexFreshnessWarning,
             lastSearch: current.lastSearchDiagnostics
         )
     }
@@ -327,6 +331,7 @@ final class SearchStore: ObservableObject {
     @Published var isIndexing = false
     @Published var isLoadingIndex = false
     @Published var isSearching = false
+    @Published var indexFreshnessWarning: String?
     @Published var statusText = "Ready"
     @Published var lastIndexedAt: Date?
     @Published var lastSearchDiagnostics: SearchDiagnostics?
@@ -1362,6 +1367,7 @@ final class SearchStore: ObservableObject {
     private func applyPersistedIndexState(_ state: PersistedIndexLoadState) {
         auxiliaryProfileEntriesByID = state.auxiliaryProfileEntriesByID
         isLoadingIndex = false
+        indexFreshnessWarning = nil
 
         guard let snapshot = state.activeSnapshot else {
             clearLoadedIndex(status: state.activeIndexLoadFailed ? "Saved index could not be loaded" : "No saved index")
@@ -1391,6 +1397,7 @@ final class SearchStore: ObservableObject {
         lastIndexedAt = nil
         isLoadingIndex = false
         isSearching = false
+        indexFreshnessWarning = nil
         statusText = entries.isEmpty ? status : "\(entries.count.formatted()) items"
         updateQueryServiceState()
     }
@@ -1750,6 +1757,7 @@ final class SearchStore: ObservableObject {
 
         isIndexing = true
         isSearching = false
+        indexFreshnessWarning = nil
         statusText = "\(reason): \(Self.displayName(forRootURL: rootURL))"
         results = []
         totalMatches = 0
@@ -1918,7 +1926,8 @@ final class SearchStore: ObservableObject {
         if changes.contains(where: \.requiresFullScan) {
             let reason = changes.compactMap(\.fullScanReason).first ?? "Filesystem full scan"
             if changes.contains(where: \.isEventHistoryLoss), !entries.isEmpty {
-                statusText = "Saved index retained; \(reason). Reindex when ready."
+                indexFreshnessWarning = "Event history lost: \(reason). Reindex when ready."
+                statusText = "Saved index retained; \(reason)."
                 updateQueryServiceState()
                 return
             }
@@ -2279,6 +2288,7 @@ final class SearchStore: ObservableObject {
             isIndexing: isIndexing,
             isLoadingIndex: isLoadingIndex,
             isSearching: isSearching,
+            indexFreshnessWarning: indexFreshnessWarning,
             sortField: sortField,
             sortDirection: sortDirection,
             options: searchOptions,

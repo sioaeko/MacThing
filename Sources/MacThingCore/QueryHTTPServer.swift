@@ -11,6 +11,7 @@ public final class QueryHTTPServer: @unchecked Sendable {
         public let isIndexing: Bool
         public let isLoadingIndex: Bool
         public let isSearching: Bool
+        public let indexFreshnessWarning: String?
         public let lastSearch: SearchDiagnostics?
 
         public init(
@@ -22,6 +23,7 @@ public final class QueryHTTPServer: @unchecked Sendable {
             isIndexing: Bool = false,
             isLoadingIndex: Bool = false,
             isSearching: Bool = false,
+            indexFreshnessWarning: String? = nil,
             lastSearch: SearchDiagnostics? = nil
         ) {
             self.rootPath = rootPath
@@ -32,6 +34,7 @@ public final class QueryHTTPServer: @unchecked Sendable {
             self.isIndexing = isIndexing
             self.isLoadingIndex = isLoadingIndex
             self.isSearching = isSearching
+            self.indexFreshnessWarning = indexFreshnessWarning
             self.lastSearch = lastSearch
         }
     }

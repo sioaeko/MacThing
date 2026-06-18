@@ -1075,6 +1075,13 @@ private struct StatusBar: View {
                     .lineLimit(1)
             }
 
+            if let indexFreshnessWarning = store.indexFreshnessWarning {
+                Text(indexFreshnessWarning)
+                    .foregroundStyle(.orange)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
             if store.isLoadingIndex {
                 HStack(spacing: 5) {
                     ProgressView()

@@ -4940,7 +4940,8 @@ do {
                 lastIndexedAt: nil,
                 statusText: "Ready",
                 isIndexing: false,
-                isLoadingIndex: true
+                isLoadingIndex: true,
+                indexFreshnessWarning: "Event history lost"
             )
         }
     )
@@ -4955,6 +4956,7 @@ do {
         statusResponse.contains("\"statusText\":\"Ready\"") &&
         statusResponse.contains("\"isIndexing\":false") &&
         statusResponse.contains("\"isLoadingIndex\":true") &&
+        statusResponse.contains("\"indexFreshnessWarning\":\"Event history lost\"") &&
         statusResponse.contains("\"isSearching\":false")) {
         fputs("HTTP status response was:\n\(statusResponse)\n", stderr)
     }
@@ -4963,6 +4965,7 @@ do {
             statusResponse.contains("\"statusText\":\"Ready\"") &&
             statusResponse.contains("\"isIndexing\":false") &&
             statusResponse.contains("\"isLoadingIndex\":true") &&
+            statusResponse.contains("\"indexFreshnessWarning\":\"Event history lost\"") &&
             statusResponse.contains("\"isSearching\":false"),
         "HTTP query service should return status JSON with indexing state"
     )
