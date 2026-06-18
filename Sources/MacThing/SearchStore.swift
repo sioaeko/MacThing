@@ -185,6 +185,14 @@ private struct PersistedIndexLoadState: Sendable {
     var activeIndexLoadFailed: Bool
 }
 
+private struct SearchExecutionKey: Equatable {
+    var query: String
+    var sortField: String
+    var sortDirection: String
+    var options: SearchOptions
+    var dataRevision: Int
+}
+
 private final class QueryServiceState: @unchecked Sendable {
     private struct Snapshot {
         var rootPath = ""
@@ -336,6 +344,9 @@ final class SearchStore: ObservableObject {
 
     private var searchTask: Task<Void, Never>?
     private var searchGeneration = 0
+    private var searchDataRevision = 0
+    private var pendingSearchExecutionKey: SearchExecutionKey?
+    private var lastSearchExecutionKey: SearchExecutionKey?
     private var historyTask: Task<Void, Never>?
     private var indexTask: Task<Void, Never>?
     private var loadIndexTask: Task<Void, Never>?
@@ -1357,6 +1368,8 @@ final class SearchStore: ObservableObject {
         searchGeneration &+= 1
         searchTask?.cancel()
         searchTask = nil
+        pendingSearchExecutionKey = nil
+        lastSearchExecutionKey = nil
         fileIndex.replaceAll([])
         rebuildEntriesFromIndexes()
         storedIndexedCount = entries.count
@@ -1567,6 +1580,7 @@ final class SearchStore: ObservableObject {
         }
 
         entries = FileIndex(entries: Array(combinedByPath.values)).entries
+        searchDataRevision &+= 1
     }
 
     private func loadAuxiliaryProfileIndex(_ profile: IndexProfile) {
@@ -1717,6 +1731,8 @@ final class SearchStore: ObservableObject {
         searchGeneration &+= 1
         searchTask?.cancel()
         searchTask = nil
+        pendingSearchExecutionKey = nil
+        lastSearchExecutionKey = nil
 
         isIndexing = true
         isSearching = false
@@ -2117,9 +2133,15 @@ final class SearchStore: ObservableObject {
     }
 
     private func scheduleSearch() {
+        let executionKey = currentSearchExecutionKey()
+        if executionKey == pendingSearchExecutionKey || executionKey == lastSearchExecutionKey {
+            return
+        }
+
         searchGeneration &+= 1
         let generation = searchGeneration
         searchTask?.cancel()
+        pendingSearchExecutionKey = executionKey
         isSearching = true
         updateQueryServiceState()
 
@@ -2181,11 +2203,23 @@ final class SearchStore: ObservableObject {
             self.lastSearchDiagnostics = response.diagnostics
             self.isSearching = false
             self.searchTask = nil
+            self.pendingSearchExecutionKey = nil
+            self.lastSearchExecutionKey = executionKey
             self.updateQueryServiceState()
             if let selectedPath = self.selectedPath, !response.entries.contains(where: { $0.path == selectedPath }) {
                 self.selectedPath = nil
             }
         }
+    }
+
+    private func currentSearchExecutionKey() -> SearchExecutionKey {
+        SearchExecutionKey(
+            query: Self.effectiveQuery(userQuery: query, filter: activeFilter),
+            sortField: sortField.rawValue,
+            sortDirection: sortDirection.rawValue,
+            options: searchOptions,
+            dataRevision: searchDataRevision
+        )
     }
 
     private nonisolated static func mergeCandidateEntries(
