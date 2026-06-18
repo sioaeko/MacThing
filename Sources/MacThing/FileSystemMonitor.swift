@@ -14,6 +14,23 @@ struct FileSystemChange: Sendable {
             contains(kFSEventStreamEventFlagEventIdsWrapped)
     }
 
+    var fullScanReason: String? {
+        if contains(kFSEventStreamEventFlagKernelDropped) ||
+            contains(kFSEventStreamEventFlagUserDropped) {
+            return "filesystem event backlog dropped"
+        }
+        if contains(kFSEventStreamEventFlagEventIdsWrapped) {
+            return "filesystem event IDs wrapped"
+        }
+        if contains(kFSEventStreamEventFlagRootChanged) {
+            return "indexed root changed"
+        }
+        if contains(kFSEventStreamEventFlagMustScanSubDirs) {
+            return "subdirectory changes need a full scan"
+        }
+        return nil
+    }
+
     var shouldScanParent: Bool {
         contains(kFSEventStreamEventFlagItemRenamed) ||
             contains(kFSEventStreamEventFlagItemRemoved)

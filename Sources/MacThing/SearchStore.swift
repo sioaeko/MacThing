@@ -592,7 +592,7 @@ final class SearchStore: ObservableObject {
 
         pendingVolumeConfirmationPath = nil
         activateOrCreateProfile(rootPath: profile.path, name: profile.displayName)
-        reindexCurrentRoot()
+        reindexCurrentRoot(reason: "Indexing volume")
     }
 
     func refreshPermissionDiagnostics() {
@@ -617,7 +617,7 @@ final class SearchStore: ObservableObject {
 
         rootPath = url.path
         activateOrCreateProfile(rootPath: url.path, name: url.lastPathComponent.nonEmpty ?? url.path)
-        index(rootURL: url)
+        index(rootURL: url, reason: "Indexing selected root")
     }
 
     func activateProfile(_ profile: IndexProfile) {
@@ -699,8 +699,8 @@ final class SearchStore: ObservableObject {
         statusText = updatedProfile.isEnabled ? "Profile included in search" : "Profile excluded from search"
     }
 
-    func reindexCurrentRoot() {
-        index(rootURL: URL(fileURLWithPath: rootPath))
+    func reindexCurrentRoot(reason: String = "Manual reindex") {
+        index(rootURL: URL(fileURLWithPath: rootPath), reason: reason)
     }
 
     func chooseExcludedPaths() {
@@ -880,7 +880,7 @@ final class SearchStore: ObservableObject {
             NSApp.terminate(nil)
         case .rebuild:
             setQuery("")
-            reindexCurrentRoot()
+            reindexCurrentRoot(reason: "Command reindex")
         case let .update(path):
             setQuery("")
             updateIndex(path: path)
@@ -910,7 +910,7 @@ final class SearchStore: ObservableObject {
 
     private func updateIndex(path rawPath: String?) {
         guard let rawPath, !rawPath.isEmpty else {
-            reindexCurrentRoot()
+            reindexCurrentRoot(reason: "Command update")
             return
         }
 
@@ -1351,7 +1351,7 @@ final class SearchStore: ObservableObject {
         auxiliaryProfileEntriesByID = state.auxiliaryProfileEntriesByID
 
         guard let snapshot = state.activeSnapshot else {
-            clearLoadedIndex(status: state.activeIndexLoadFailed ? "Index could not be loaded" : "No index")
+            clearLoadedIndex(status: state.activeIndexLoadFailed ? "Saved index could not be loaded" : "No saved index")
             return
         }
 
@@ -1360,7 +1360,7 @@ final class SearchStore: ObservableObject {
         rebuildEntriesFromIndexes()
         storedIndexedCount = entries.count
         lastIndexedAt = snapshot.createdAt
-        statusText = "\(entries.count.formatted()) items\(enabledProfileCount > 1 ? " across \(enabledProfileCount) profiles" : "")"
+        statusText = "Loaded \(entries.count.formatted()) saved items\(enabledProfileCount > 1 ? " across \(enabledProfileCount) profiles" : "")"
         updateQueryServiceState()
     }
 
@@ -1630,14 +1630,14 @@ final class SearchStore: ObservableObject {
         }
     }
 
-    private func reindexProfile(profileID: String) {
+    private func reindexProfile(profileID: String, reason: String = "Profile reindex") {
         guard let profile = indexProfiles.first(where: { $0.id == profileID }) else {
             return
         }
 
         loadIndexTask?.cancel()
         if profileID == activeProfileID {
-            index(rootURL: URL(fileURLWithPath: profile.rootPath))
+            index(rootURL: URL(fileURLWithPath: profile.rootPath), reason: reason)
             return
         }
 
@@ -1645,7 +1645,7 @@ final class SearchStore: ObservableObject {
         let configuration = scanConfiguration(rootURL: rootURL, profile: profile)
         let existingEntriesByPath = entriesByPath(forProfileID: profileID)
         isIndexing = true
-        statusText = "Indexing \(profile.displayName)..."
+        statusText = "\(reason): \(profile.displayName)"
         updateQueryServiceState()
 
         indexTask = Task { [weak self] in
@@ -1725,7 +1725,7 @@ final class SearchStore: ObservableObject {
         saveSettings()
     }
 
-    private func index(rootURL: URL) {
+    private func index(rootURL: URL, reason: String = "Manual reindex") {
         loadIndexTask?.cancel()
         indexTask?.cancel()
         searchGeneration &+= 1
@@ -1736,7 +1736,7 @@ final class SearchStore: ObservableObject {
 
         isIndexing = true
         isSearching = false
-        statusText = "Indexing..."
+        statusText = "\(reason): \(Self.displayName(forRootURL: rootURL))"
         results = []
         totalMatches = 0
         selectedPath = nil
@@ -1902,7 +1902,8 @@ final class SearchStore: ObservableObject {
         }
 
         if changes.contains(where: \.requiresFullScan) {
-            reindexProfile(profileID: profileID)
+            let reason = changes.compactMap(\.fullScanReason).first ?? "Filesystem full scan"
+            reindexProfile(profileID: profileID, reason: "Full rescan: \(reason)")
             return
         }
 
@@ -2277,6 +2278,10 @@ final class SearchStore: ObservableObject {
         return "\(filterPrefix) \(trimmedUserQuery)"
     }
 
+    private nonisolated static func displayName(forRootURL rootURL: URL) -> String {
+        rootURL.lastPathComponent.nonEmpty ?? rootURL.path
+    }
+
     private nonisolated static func databaseEntryCount(indexURLs: [URL]) -> Int {
         var totalCount = 0
         for indexURL in indexURLs where FileManager.default.fileExists(atPath: indexURL.path) {
@@ -2472,7 +2477,7 @@ final class SearchStore: ObservableObject {
         indexProfiles[index].updatedAt = Date()
         saveIndexProfiles()
         statusText = status
-        reindexCurrentRoot()
+        reindexCurrentRoot(reason: "\(status); rebuilding index")
     }
 
     private func touchActiveProfile(lastFSEventID: UInt64? = nil) {
