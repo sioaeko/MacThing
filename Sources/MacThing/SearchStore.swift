@@ -2401,9 +2401,9 @@ final class SearchStore: ObservableObject {
         var candidatesByPath: [String: FileEntry] = [:]
         let requestedWindowEnd = max(request.offset + request.limit, request.limit)
         let shortestTermLength = hint.terms.map(\.count).min() ?? Int.max
-        let candidateMultiplier = shortestTermLength <= 2 ? 8 : 16
-        let candidateFloor = shortestTermLength <= 2 ? 1_000 : 2_000
-        let candidateCeiling = shortestTermLength <= 2 ? 5_000 : 12_000
+        let candidateMultiplier = 8
+        let candidateFloor = shortestTermLength <= 2 ? 1_000 : 1_500
+        let candidateCeiling = shortestTermLength <= 2 ? 5_000 : 8_000
         let perIndexLimit = min(
             max(requestedWindowEnd * candidateMultiplier, candidateFloor),
             candidateCeiling
