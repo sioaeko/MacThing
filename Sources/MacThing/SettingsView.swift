@@ -32,25 +32,14 @@ private struct ShortcutSettingsPane: View {
             }
 
             GroupBox("Global Hotkey") {
-                ShortcutPickerRow(
+                ShortcutMappingRow(
                     title: "Quick Search",
                     detail: "Open the floating search palette from anywhere",
-                    value: store.globalHotkeyChoice.displayName
-                ) {
-                    Picker(
-                        "",
-                        selection: Binding(
-                            get: { store.globalHotkeyChoice },
-                            set: { store.setGlobalHotkeyChoice($0) }
-                        )
-                    ) {
-                        ForEach(GlobalHotkeyChoice.allCases) { choice in
-                            Text(choice.displayName)
-                                .tag(choice)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 220)
+                    value: store.globalHotkeyChoice.shortcut,
+                    mode: .globalHotkey,
+                    presets: GlobalHotkeyChoice.allCases.map(\.shortcut)
+                ) { choice in
+                    store.setGlobalHotkeyChoice(GlobalHotkeyChoice(shortcut: choice))
                 }
             }
 
@@ -60,25 +49,14 @@ private struct ShortcutSettingsPane: View {
                     ForEach(actions.indices, id: \.self) { index in
                         let action = actions[index]
 
-                        ShortcutPickerRow(
+                        ShortcutMappingRow(
                             title: action.displayName,
                             detail: action.settingDetail,
-                            value: store.appShortcutSettings.choice(for: action).displayName
-                        ) {
-                            Picker(
-                                "",
-                                selection: Binding(
-                                    get: { store.appShortcutSettings.choice(for: action) },
-                                    set: { store.setAppShortcutChoice($0, for: action) }
-                                )
-                            ) {
-                                ForEach(action.availableChoices) { choice in
-                                    Text(choice.displayName)
-                                        .tag(choice)
-                                }
-                            }
-                            .labelsHidden()
-                            .frame(width: 220)
+                            value: store.appShortcutSettings.choice(for: action),
+                            mode: .menuCommand,
+                            presets: action.availableChoices
+                        ) { choice in
+                            store.setAppShortcutChoice(choice, for: action)
                         }
 
                         if index < actions.index(before: actions.endIndex) {
@@ -94,22 +72,28 @@ private struct ShortcutSettingsPane: View {
     }
 }
 
-private struct ShortcutPickerRow<PickerContent: View>: View {
+private struct ShortcutMappingRow: View {
     let title: String
     let detail: String
-    let value: String
-    let picker: PickerContent
+    let value: AppShortcutChoice
+    let mode: ShortcutRecorder.Mode
+    let presets: [AppShortcutChoice]
+    let onChange: (AppShortcutChoice) -> Void
 
     init(
         title: String,
         detail: String,
-        value: String,
-        @ViewBuilder picker: () -> PickerContent
+        value: AppShortcutChoice,
+        mode: ShortcutRecorder.Mode,
+        presets: [AppShortcutChoice],
+        onChange: @escaping (AppShortcutChoice) -> Void
     ) {
         self.title = title
         self.detail = detail
         self.value = value
-        self.picker = picker()
+        self.mode = mode
+        self.presets = presets
+        self.onChange = onChange
     }
 
     var body: some View {
@@ -125,13 +109,35 @@ private struct ShortcutPickerRow<PickerContent: View>: View {
 
             Spacer(minLength: 16)
 
-            Text(value)
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .frame(width: 150, alignment: .trailing)
+            ShortcutRecorder(value: value, mode: mode, onChange: onChange)
+                .frame(width: 172, height: 28)
 
-            picker
+            Menu {
+                ForEach(presets) { choice in
+                    Button {
+                        onChange(choice)
+                    } label: {
+                        if choice == value {
+                            Label(choice.displayName, systemImage: "checkmark")
+                        } else {
+                            Text(choice.displayName)
+                        }
+                    }
+                }
+
+                if !presets.contains(.disabled) {
+                    Divider()
+                    Button("Disabled") {
+                        onChange(.disabled)
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .frame(width: 20, height: 20)
+            }
+            .menuStyle(.borderlessButton)
+            .frame(width: 28)
+            .help("Choose a preset shortcut")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 9)

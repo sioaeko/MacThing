@@ -233,8 +233,11 @@ The current packaged release is available from GitHub:
 - User filters save a reusable query expression and can be reapplied from the
   toolbar or menu bar extra.
 - Global Option+Space hotkey opens a compact floating search palette.
-- Global hotkey can be switched between Option Space, Control Option Space,
-  Command Option Space, or disabled.
+- Settings > Shortcuts provides an Everything-style key mapping table: click a
+  shortcut field and press a new key combination, or use the preset menu for
+  quick choices and disabling.
+- Global hotkey can be recorded directly or switched between presets such as
+  Option Space, Control Option Space, Command Option Space, F13, or disabled.
 - The compact palette supports type-to-search, result selection, Enter to open,
   and Escape to dismiss.
 - Menu bar extra provides quick search, show window, reindex, index status, and

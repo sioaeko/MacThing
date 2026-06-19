@@ -51,6 +51,30 @@ expect(
     "app shortcut settings should clear duplicate command mappings"
 )
 
+let customShortcut = AppShortcutChoice(key: .m, modifiers: [.command, .option])
+let customShortcutData = try! JSONEncoder().encode(customShortcut)
+let decodedCustomShortcut = try! JSONDecoder().decode(AppShortcutChoice.self, from: customShortcutData)
+expect(
+    decodedCustomShortcut == customShortcut,
+    "custom app shortcuts should round-trip through settings storage"
+)
+
+let legacyShortcutData = Data("\"commandOptionP\"".utf8)
+let decodedLegacyShortcut = try! JSONDecoder().decode(AppShortcutChoice.self, from: legacyShortcutData)
+expect(
+    decodedLegacyShortcut == .commandOptionP,
+    "app shortcuts should decode legacy preset storage names"
+)
+
+let reassignedCustomShortcuts = AppShortcutSettings.defaults
+    .setting(customShortcut, for: .toggleFuzzyMatching)
+    .setting(customShortcut, for: .toggleCaseSensitive)
+expect(
+    reassignedCustomShortcuts.choice(for: .toggleFuzzyMatching) == .disabled &&
+        reassignedCustomShortcuts.choice(for: .toggleCaseSensitive) == customShortcut,
+    "custom app shortcut settings should clear duplicate command mappings"
+)
+
 for action in AppShortcutAction.allCases {
     expect(
         action.availableChoices.contains(defaultShortcuts.choice(for: action)),

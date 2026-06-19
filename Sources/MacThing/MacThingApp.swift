@@ -160,49 +160,60 @@ private extension View {
 
 private extension AppShortcutChoice {
     var keyEquivalent: KeyEquivalent? {
-        switch self {
-        case .optionSpace, .controlOptionSpace, .commandOptionSpace, .controlCommandSpace:
-            return " "
-        case .optionF, .controlOptionF, .commandOptionF, .commandShiftF:
-            return "f"
-        case .command0:
-            return "0"
-        case .command1:
-            return "1"
-        case .controlCommandM:
-            return "m"
-        case .commandShiftR, .controlCommandR, .commandOptionR:
-            return "r"
-        case .commandOptionP, .controlOptionP:
-            return "p"
-        case .commandOptionU, .controlOptionU:
-            return "u"
-        case .commandOptionC, .controlOptionC:
-            return "c"
-        case .commandShiftE, .commandOptionE:
-            return "e"
-        case .disabled:
+        guard let key else {
             return nil
+        }
+
+        switch key {
+        case .returnKey:
+            return .return
+        case .tab:
+            return .tab
+        case .delete:
+            return .delete
+        case .escape:
+            return .escape
+        case .home:
+            return .home
+        case .pageUp:
+            return .pageUp
+        case .forwardDelete:
+            return .deleteForward
+        case .end:
+            return .end
+        case .pageDown:
+            return .pageDown
+        case .leftArrow:
+            return .leftArrow
+        case .rightArrow:
+            return .rightArrow
+        case .downArrow:
+            return .downArrow
+        case .upArrow:
+            return .upArrow
+        default:
+            guard let literal = key.keyEquivalentLiteral,
+                  let character = literal.first else {
+                return nil
+            }
+            return KeyEquivalent(character)
         }
     }
 
     var eventModifiers: EventModifiers {
-        switch self {
-        case .optionSpace, .optionF:
-            return [.option]
-        case .controlOptionSpace, .controlOptionF, .controlOptionP, .controlOptionU, .controlOptionC:
-            return [.control, .option]
-        case .commandOptionSpace, .commandOptionF, .commandOptionR, .commandOptionP, .commandOptionU,
-             .commandOptionC, .commandOptionE:
-            return [.command, .option]
-        case .controlCommandSpace, .controlCommandM, .controlCommandR:
-            return [.control, .command]
-        case .commandShiftF, .commandShiftR, .commandShiftE:
-            return [.command, .shift]
-        case .command0, .command1:
-            return [.command]
-        case .disabled:
-            return []
+        var eventModifiers: EventModifiers = []
+        if modifiers.contains(.command) {
+            eventModifiers.insert(.command)
         }
+        if modifiers.contains(.control) {
+            eventModifiers.insert(.control)
+        }
+        if modifiers.contains(.option) {
+            eventModifiers.insert(.option)
+        }
+        if modifiers.contains(.shift) {
+            eventModifiers.insert(.shift)
+        }
+        return eventModifiers
     }
 }

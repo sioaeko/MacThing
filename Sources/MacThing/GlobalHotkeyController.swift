@@ -1,86 +1,63 @@
 import AppKit
 import Carbon
 import Foundation
+import MacThingCore
 
-enum GlobalHotkeyChoice: String, Codable, CaseIterable, Identifiable, Sendable {
-    case optionSpace
-    case controlOptionSpace
-    case commandOptionSpace
-    case controlCommandSpace
-    case optionF
-    case controlOptionF
-    case commandOptionF
-    case commandShiftF
-    case f13
-    case disabled
+struct GlobalHotkeyChoice: Codable, CaseIterable, Hashable, Identifiable, Sendable {
+    var shortcut: AppShortcutChoice
 
-    var id: String { rawValue }
+    var id: String { shortcut.id }
 
     static var recommended: GlobalHotkeyChoice {
         .optionSpace
     }
 
+    static let optionSpace = GlobalHotkeyChoice(shortcut: .optionSpace)
+    static let controlOptionSpace = GlobalHotkeyChoice(shortcut: .controlOptionSpace)
+    static let commandOptionSpace = GlobalHotkeyChoice(shortcut: .commandOptionSpace)
+    static let controlCommandSpace = GlobalHotkeyChoice(shortcut: .controlCommandSpace)
+    static let optionF = GlobalHotkeyChoice(shortcut: .optionF)
+    static let controlOptionF = GlobalHotkeyChoice(shortcut: .controlOptionF)
+    static let commandOptionF = GlobalHotkeyChoice(shortcut: .commandOptionF)
+    static let commandShiftF = GlobalHotkeyChoice(shortcut: .commandShiftF)
+    static let f13 = GlobalHotkeyChoice(shortcut: .f13)
+    static let disabled = GlobalHotkeyChoice(shortcut: .disabled)
+
+    static let allCases: [GlobalHotkeyChoice] = [
+        .optionSpace,
+        .controlOptionSpace,
+        .commandOptionSpace,
+        .controlCommandSpace,
+        .optionF,
+        .controlOptionF,
+        .commandOptionF,
+        .commandShiftF,
+        .f13,
+        .disabled
+    ]
+
     var displayName: String {
-        switch self {
-        case .optionSpace:
-            return "Option Space"
-        case .controlOptionSpace:
-            return "Control Option Space"
-        case .commandOptionSpace:
-            return "Command Option Space"
-        case .controlCommandSpace:
-            return "Control Command Space"
-        case .optionF:
-            return "Option F"
-        case .controlOptionF:
-            return "Control Option F"
-        case .commandOptionF:
-            return "Command Option F"
-        case .commandShiftF:
-            return "Command Shift F"
-        case .f13:
-            return "F13"
-        case .disabled:
-            return "Disabled"
-        }
+        shortcut.displayName
     }
 
     fileprivate var keyCode: UInt32? {
-        switch self {
-        case .optionSpace, .controlOptionSpace, .commandOptionSpace, .controlCommandSpace:
-            return UInt32(kVK_Space)
-        case .optionF, .controlOptionF, .commandOptionF, .commandShiftF:
-            return UInt32(kVK_ANSI_F)
-        case .f13:
-            return UInt32(kVK_F13)
-        case .disabled:
-            return nil
-        }
+        shortcut.key.map { UInt32($0.rawValue) }
     }
 
     fileprivate var modifiers: UInt32 {
-        switch self {
-        case .optionSpace:
-            return UInt32(optionKey)
-        case .controlOptionSpace:
-            return UInt32(controlKey | optionKey)
-        case .commandOptionSpace:
-            return UInt32(cmdKey | optionKey)
-        case .controlCommandSpace:
-            return UInt32(controlKey | cmdKey)
-        case .optionF:
-            return UInt32(optionKey)
-        case .controlOptionF:
-            return UInt32(controlKey | optionKey)
-        case .commandOptionF:
-            return UInt32(cmdKey | optionKey)
-        case .commandShiftF:
-            return UInt32(cmdKey | shiftKey)
-        case .f13:
-            return 0
-        case .disabled:
-            return 0
-        }
+        shortcut.modifiers.carbonModifierFlags
+    }
+
+    init(shortcut: AppShortcutChoice) {
+        self.shortcut = shortcut
+    }
+
+    init(from decoder: Decoder) throws {
+        shortcut = try AppShortcutChoice(from: decoder)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        try shortcut.encode(to: encoder)
     }
 }
 
@@ -176,5 +153,24 @@ final class GlobalHotkeyController {
 private func fourCharCode(_ value: String) -> OSType {
     value.utf8.reduce(0) { result, byte in
         (result << 8) + OSType(byte)
+    }
+}
+
+private extension AppShortcutModifierFlags {
+    var carbonModifierFlags: UInt32 {
+        var flags: UInt32 = 0
+        if contains(.command) {
+            flags |= UInt32(cmdKey)
+        }
+        if contains(.control) {
+            flags |= UInt32(controlKey)
+        }
+        if contains(.option) {
+            flags |= UInt32(optionKey)
+        }
+        if contains(.shift) {
+            flags |= UInt32(shiftKey)
+        }
+        return flags
     }
 }
