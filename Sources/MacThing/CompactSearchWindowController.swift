@@ -222,11 +222,13 @@ private struct CompactResultRow: View {
 
     var body: some View {
         HStack(spacing: 11) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: entry.path))
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 24, height: 24)
-                .frame(width: 32, height: 28, alignment: .center)
+            CachedFileIcon(
+                path: entry.path,
+                iconSize: 24,
+                frameWidth: 32,
+                frameHeight: 28,
+                alignment: .center
+            )
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(entry.name)

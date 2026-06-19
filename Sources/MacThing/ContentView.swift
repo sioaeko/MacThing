@@ -869,7 +869,7 @@ private struct ResultCell: View {
             switch column {
             case .name:
                 HStack(spacing: 10) {
-                    FileIcon(path: entry.path)
+                    CachedFileIcon(path: entry.path)
 
                     Text(entry.name)
                         .lineLimit(1)
@@ -991,18 +991,6 @@ private extension View {
         case .year:
             frame(width: 76, alignment: .trailing)
         }
-    }
-}
-
-private struct FileIcon: View {
-    let path: String
-
-    var body: some View {
-        Image(nsImage: NSWorkspace.shared.icon(forFile: path))
-            .resizable()
-            .aspectRatio(contentMode: .fit)
-            .frame(width: 22, height: 22)
-            .frame(width: 30, height: 24, alignment: .leading)
     }
 }
 
