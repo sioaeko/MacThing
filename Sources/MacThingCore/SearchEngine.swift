@@ -1730,6 +1730,7 @@ private struct SearchMatch {
 
 private struct SearchContext {
     let entries: [FileEntry]
+    private let normalizationCache: SearchNormalizationCache
     let normalizedNameCounts: [String: Int]
     let normalizedNamePartCounts: [String: Int]
     let normalizedExtensionCounts: [String: Int]
@@ -1747,6 +1748,8 @@ private struct SearchContext {
     let fileSystemIndexBySourceKey: [String: Int]
 
     init(entries: [FileEntry], options: SearchOptions, buildFullIndexes: Bool = true) {
+        normalizationCache = SearchNormalizationCache(options: options, capacity: entries.count)
+
         guard buildFullIndexes else {
             self.entries = entries
             normalizedNameCounts = [:]
@@ -1844,6 +1847,18 @@ private struct SearchContext {
 
     func fileSystemIndex(for entry: FileEntry) -> Int? {
         fileSystemIndexBySourceKey[Self.fileSystemSourceKey(for: entry)]
+    }
+
+    func normalizedLiteral(_ value: String, options: SearchOptions) -> String {
+        normalizationCache.normalizedLiteral(value, options: options)
+    }
+
+    func normalizedName(for entry: FileEntry, options: SearchOptions) -> String {
+        normalizationCache.normalizedName(for: entry, options: options)
+    }
+
+    func normalizedPath(for entry: FileEntry, options: SearchOptions) -> String {
+        normalizationCache.normalizedPath(for: entry, options: options)
     }
 
     private static func fileSystemSourceKey(for entry: FileEntry) -> String {
@@ -2035,6 +2050,58 @@ private struct SearchContext {
         case .file, .symlink, .other:
             return folderCount
         }
+    }
+}
+
+private final class SearchNormalizationCache {
+    private let options: SearchOptions
+    private var normalizedLiterals: [String: String] = [:]
+    private var normalizedNamesByPath: [String: String] = [:]
+    private var normalizedPathsByPath: [String: String] = [:]
+
+    init(options: SearchOptions, capacity: Int) {
+        self.options = options
+        normalizedNamesByPath.reserveCapacity(min(capacity, 8_192))
+        normalizedPathsByPath.reserveCapacity(min(capacity, 8_192))
+    }
+
+    func normalizedLiteral(_ value: String, options: SearchOptions) -> String {
+        guard options == self.options else {
+            return SearchEngine.normalize(value, options: options)
+        }
+        if let cached = normalizedLiterals[value] {
+            return cached
+        }
+
+        let normalized = SearchEngine.normalize(value, options: options)
+        normalizedLiterals[value] = normalized
+        return normalized
+    }
+
+    func normalizedName(for entry: FileEntry, options: SearchOptions) -> String {
+        guard options == self.options else {
+            return SearchEngine.normalize(entry.name, options: options)
+        }
+        if let cached = normalizedNamesByPath[entry.path] {
+            return cached
+        }
+
+        let normalized = SearchEngine.normalize(entry.name, options: options)
+        normalizedNamesByPath[entry.path] = normalized
+        return normalized
+    }
+
+    func normalizedPath(for entry: FileEntry, options: SearchOptions) -> String {
+        guard options == self.options else {
+            return SearchEngine.normalize(entry.path, options: options)
+        }
+        if let cached = normalizedPathsByPath[entry.path] {
+            return cached
+        }
+
+        let normalized = SearchEngine.normalize(entry.path, options: options)
+        normalizedPathsByPath[entry.path] = normalized
+        return normalized
     }
 }
 
@@ -2301,7 +2368,7 @@ private indirect enum SearchPredicate {
             if options.regexMatching {
                 return regexScore(pattern: value, entry: entry, options: options)
             }
-            return textScore(value: value, entry: entry, options: options)
+            return textScore(value: value, entry: entry, options: options, context: context)
         case let .wildcard(pattern):
             if options.regexMatching {
                 return regexScore(pattern: pattern, entry: entry, options: options)
@@ -2310,7 +2377,7 @@ private indirect enum SearchPredicate {
         case let .regex(pattern):
             return regexScore(pattern: pattern, entry: entry, options: options)
         case let .wholeFilename(value):
-            return wholeFilenameScore(value: value, entry: entry, options: options)
+            return wholeFilenameScore(value: value, entry: entry, options: options, context: context)
         case let .fileList(values):
             return fileListScore(values: values, entry: entry, options: options)
         case let .fileListFilename(values):
@@ -2528,9 +2595,9 @@ private indirect enum SearchPredicate {
             }
             return filter.matches(dimensions) ? 1 : nil
         case let .startsWith(value):
-            return startsWith(substituteSearchValue(value, entry: entry), in: entry.name, options: options) ? 4 : nil
+            return startsWithNameScore(value: value, entry: entry, options: options, context: context)
         case let .endsWith(value):
-            return endsWith(substituteSearchValue(value, entry: entry), in: entry.name, options: options) ? 8 : nil
+            return endsWithNameScore(value: value, entry: entry, options: options, context: context)
         case .empty:
             return isEmpty(entry: entry, context: context) ? 1 : nil
         case .notEmpty:
@@ -2589,9 +2656,15 @@ private indirect enum SearchPredicate {
         }
     }
 
-    private func textScore(value: String, entry: FileEntry, options: SearchOptions) -> Int? {
-        let query = SearchEngine.normalize(substituteSearchValue(value, entry: entry), options: options)
-        let name = SearchEngine.normalize(entry.name, options: options)
+    private func textScore(
+        value: String,
+        entry: FileEntry,
+        options: SearchOptions,
+        context: SearchContext
+    ) -> Int? {
+        let resolvedQuery = substituteSearchValue(value, entry: entry)
+        let query = context.normalizedLiteral(resolvedQuery, options: options)
+        let name = context.normalizedName(for: entry, options: options)
 
         if name == query {
             return 0
@@ -2600,8 +2673,8 @@ private indirect enum SearchPredicate {
             if containsWholeWord(query, in: name) {
                 return 10
             }
-            if shouldSearchPath(query, options: options) {
-                let path = SearchEngine.normalize(entry.path, options: options)
+            if shouldSearchPath(resolvedQuery, options: options) {
+                let path = context.normalizedPath(for: entry, options: options)
                 if containsWholeWord(query, in: path) {
                     return 26
                 }
@@ -2614,8 +2687,8 @@ private indirect enum SearchPredicate {
         if name.contains(query) {
             return 12
         }
-        if shouldSearchPath(query, options: options) {
-            let path = SearchEngine.normalize(entry.path, options: options)
+        if shouldSearchPath(resolvedQuery, options: options) {
+            let path = context.normalizedPath(for: entry, options: options)
             if path.contains(query) {
                 return 28
             }
@@ -2627,9 +2700,34 @@ private indirect enum SearchPredicate {
         return nil
     }
 
-    private func wholeFilenameScore(value: String, entry: FileEntry, options: SearchOptions) -> Int? {
-        SearchEngine.normalize(entry.name, options: options) ==
-            SearchEngine.normalize(substituteSearchValue(value, entry: entry), options: options) ? 0 : nil
+    private func wholeFilenameScore(
+        value: String,
+        entry: FileEntry,
+        options: SearchOptions,
+        context: SearchContext
+    ) -> Int? {
+        context.normalizedName(for: entry, options: options) ==
+            context.normalizedLiteral(substituteSearchValue(value, entry: entry), options: options) ? 0 : nil
+    }
+
+    private func startsWithNameScore(
+        value: String,
+        entry: FileEntry,
+        options: SearchOptions,
+        context: SearchContext
+    ) -> Int? {
+        let query = context.normalizedLiteral(substituteSearchValue(value, entry: entry), options: options)
+        return context.normalizedName(for: entry, options: options).hasPrefix(query) ? 4 : nil
+    }
+
+    private func endsWithNameScore(
+        value: String,
+        entry: FileEntry,
+        options: SearchOptions,
+        context: SearchContext
+    ) -> Int? {
+        let query = context.normalizedLiteral(substituteSearchValue(value, entry: entry), options: options)
+        return context.normalizedName(for: entry, options: options).hasSuffix(query) ? 8 : nil
     }
 
     private func fileListScore(values: Set<String>, entry: FileEntry, options: SearchOptions) -> Int? {
