@@ -118,6 +118,48 @@ for action in AppShortcutAction.allCases {
     )
 }
 
+expect(
+    SearchCandidateHint(
+        terms: ["go"],
+        canUseDatabaseCandidates: true
+    ).databaseCandidateLimit(requestedWindowEnd: 500) == 4_000,
+    "short broad terms should keep a wide SQLite candidate window"
+)
+
+expect(
+    SearchCandidateHint(
+        terms: ["swift"],
+        canUseDatabaseCandidates: true
+    ).databaseCandidateLimit(requestedWindowEnd: 500) == 2_000,
+    "specific single terms should use a tighter SQLite candidate window"
+)
+
+expect(
+    SearchCandidateHint(
+        terms: ["launch", "notes"],
+        canUseDatabaseCandidates: true
+    ).databaseCandidateLimit(requestedWindowEnd: 500) == 1_500,
+    "multi-term searches should use a tighter SQLite candidate window"
+)
+
+expect(
+    SearchCandidateHint(
+        terms: ["launch"],
+        canUseDatabaseCandidates: true,
+        extensions: ["swift"]
+    ).databaseCandidateLimit(requestedWindowEnd: 500) == 1_000,
+    "structured text searches should use a tighter SQLite candidate window"
+)
+
+expect(
+    SearchCandidateHint(
+        terms: [],
+        canUseDatabaseCandidates: true,
+        extensions: ["swift"]
+    ).databaseCandidateLimit(requestedWindowEnd: 500) == 2_000,
+    "structured-only searches should keep enough SQLite candidates for result windows"
+)
+
 func httpGet(port: UInt16, path: String, timeoutSeconds: Int = 5) throws -> String {
     let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
     guard fd >= 0 else {

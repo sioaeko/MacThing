@@ -80,6 +80,8 @@ The current packaged release is available from GitHub:
   substring fallback candidates before the Everything-style ranker validates
   results. Enabled file-list sources stay in the candidate set even when SQLite
   pruning is active.
+- SQLite candidate windows adapt to query specificity, keeping very short
+  searches broad while trimming more specific terms and structured filters.
 - SQLite candidate seeding also applies supported structured filters such as
   extension, kind/category, file size, dates, and file attributes when they are
   combined with text terms.

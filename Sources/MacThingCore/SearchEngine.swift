@@ -605,6 +605,52 @@ public struct SearchCandidateHint: Sendable {
             !dateFilters.isEmpty ||
             !parentPaths.isEmpty
     }
+
+    public func databaseCandidateLimit(requestedWindowEnd: Int) -> Int {
+        let windowEnd = max(1, requestedWindowEnd)
+        let shortestTermLength = terms.map(\.count).min() ?? Int.max
+
+        var multiplier: Int
+        var floor: Int
+        var ceiling: Int
+
+        if terms.isEmpty && hasStructuredFilters {
+            multiplier = 4
+            floor = 1_000
+            ceiling = 6_000
+        } else if shortestTermLength <= 2 {
+            multiplier = 8
+            floor = 1_000
+            ceiling = 5_000
+        } else if terms.count >= 2 {
+            multiplier = 3
+            floor = 800
+            ceiling = 5_000
+        } else if shortestTermLength == 3 {
+            multiplier = 5
+            floor = 1_200
+            ceiling = 6_000
+        } else if shortestTermLength <= 5 {
+            multiplier = 4
+            floor = 1_000
+            ceiling = 6_000
+        } else {
+            multiplier = 3
+            floor = 800
+            ceiling = 5_000
+        }
+
+        if hasStructuredFilters && !terms.isEmpty {
+            multiplier = max(2, multiplier - 1)
+            floor = min(floor, 800)
+            ceiling = min(ceiling, 5_000)
+        }
+
+        let multiplied = windowEnd > Int.max / multiplier
+            ? Int.max
+            : windowEnd * multiplier
+        return min(max(multiplied, floor), ceiling)
+    }
 }
 
 public enum SearchEngine {

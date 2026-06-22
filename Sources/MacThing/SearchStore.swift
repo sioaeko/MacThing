@@ -2400,14 +2400,7 @@ final class SearchStore: ObservableObject {
 
         var candidatesByPath: [String: FileEntry] = [:]
         let requestedWindowEnd = max(request.offset + request.limit, request.limit)
-        let shortestTermLength = hint.terms.map(\.count).min() ?? Int.max
-        let candidateMultiplier = 8
-        let candidateFloor = shortestTermLength <= 2 ? 1_000 : 1_500
-        let candidateCeiling = shortestTermLength <= 2 ? 5_000 : 8_000
-        let perIndexLimit = min(
-            max(requestedWindowEnd * candidateMultiplier, candidateFloor),
-            candidateCeiling
-        )
+        let perIndexLimit = hint.databaseCandidateLimit(requestedWindowEnd: requestedWindowEnd)
         for indexURL in indexURLs {
             let candidates = try IndexStorage.candidateEntries(
                 hint: hint,
