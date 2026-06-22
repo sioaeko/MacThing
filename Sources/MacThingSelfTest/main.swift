@@ -4726,6 +4726,14 @@ do {
         "SQLite candidate search should apply extension filters"
     )
 
+    let wildcardJPGHint = SearchEngine.candidateHint(for: SearchRequest(query: "*.jpg"))
+    let wildcardJPGCandidates = try IndexStorage.candidateEntries(hint: wildcardJPGHint, limit: 20, from: databaseURL)
+    expect(
+        wildcardJPGHint.canUseDatabaseCandidates &&
+            wildcardJPGCandidates.map(\.path) == [photo.path],
+        "SQLite candidate search should narrow literal-extension wildcard queries"
+    )
+
     let noExtensionCandidates = try IndexStorage.candidateEntries(hint: noExtensionHint, limit: 20, from: databaseURL)
     expect(
         Set(noExtensionCandidates.map(\.path)) == Set([hiddenEntry.path, symlinkEntry.path]),

@@ -879,6 +879,13 @@ public enum SearchEngine {
             }
 
             if token.contains("*") || token.contains("?") {
+                if let extensionName = literalExtensionFromWildcardPattern(token) {
+                    guard !token.contains(":") else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    extensions.insert(extensionName)
+                    continue
+                }
                 return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
             }
 
@@ -1170,6 +1177,28 @@ public enum SearchEngine {
                 }
                 .filter { !$0.isEmpty }
         )
+    }
+
+    private static func literalExtensionFromWildcardPattern(_ value: String) -> String? {
+        let normalizedValue = unescapeQuotedListSeparators(value)
+            .replacingOccurrences(of: "\\", with: "/")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard normalizedValue.contains("*") || normalizedValue.contains("?"),
+              let dotIndex = normalizedValue.lastIndex(of: "."),
+              dotIndex < normalizedValue.index(before: normalizedValue.endIndex) else {
+            return nil
+        }
+
+        let suffix = normalizedValue[normalizedValue.index(after: dotIndex)...]
+        guard !suffix.contains("*"), !suffix.contains("?"), !suffix.contains("/") else {
+            return nil
+        }
+
+        let extensionName = suffix
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return extensionName.isEmpty ? nil : extensionName
     }
 
     static func parseDelimitedList(_ value: String) -> Set<String> {
@@ -1731,6 +1760,7 @@ private struct SearchMatch {
 private struct SearchContext {
     let entries: [FileEntry]
     private let normalizationCache: SearchNormalizationCache
+    private let regexCache = SearchRegexCache()
     let normalizedNameCounts: [String: Int]
     let normalizedNamePartCounts: [String: Int]
     let normalizedExtensionCounts: [String: Int]
@@ -1863,6 +1893,10 @@ private struct SearchContext {
 
     func normalizedPath(for entry: FileEntry, options: SearchOptions) -> String {
         normalizationCache.normalizedPath(for: entry, options: options)
+    }
+
+    func regex(pattern: String, caseSensitive: Bool) -> NSRegularExpression? {
+        regexCache.regex(pattern: pattern, caseSensitive: caseSensitive)
     }
 
     private static func fileSystemSourceKey(for entry: FileEntry) -> String {
@@ -2121,6 +2155,29 @@ private final class SearchNormalizationCache {
         let normalized = SearchEngine.normalize(entry.path, options: options)
         normalizedPathsByPath[entry.path] = normalized
         return normalized
+    }
+}
+
+private final class SearchRegexCache {
+    private struct Key: Hashable {
+        var pattern: String
+        var caseSensitive: Bool
+    }
+
+    private var expressions: [Key: NSRegularExpression] = [:]
+
+    func regex(pattern: String, caseSensitive: Bool) -> NSRegularExpression? {
+        let key = Key(pattern: pattern, caseSensitive: caseSensitive)
+        if let cached = expressions[key] {
+            return cached
+        }
+
+        let options: NSRegularExpression.Options = caseSensitive ? [] : [.caseInsensitive]
+        guard let expression = try? NSRegularExpression(pattern: pattern, options: options) else {
+            return nil
+        }
+        expressions[key] = expression
+        return expression
     }
 }
 
@@ -2385,16 +2442,16 @@ private indirect enum SearchPredicate {
             return predicate.score(entry: entry, options: overrides.applying(to: options), context: context)
         case let .text(value):
             if options.regexMatching {
-                return regexScore(pattern: value, entry: entry, options: options)
+                return regexScore(pattern: value, entry: entry, options: options, context: context)
             }
             return textScore(value: value, entry: entry, options: options, context: context)
         case let .wildcard(pattern):
             if options.regexMatching {
-                return regexScore(pattern: pattern, entry: entry, options: options)
+                return regexScore(pattern: pattern, entry: entry, options: options, context: context)
             }
-            return wildcardScore(pattern: pattern, entry: entry, options: options)
+            return wildcardScore(pattern: pattern, entry: entry, options: options, context: context)
         case let .regex(pattern):
-            return regexScore(pattern: pattern, entry: entry, options: options)
+            return regexScore(pattern: pattern, entry: entry, options: options, context: context)
         case let .wholeFilename(value):
             return wholeFilenameScore(value: value, entry: entry, options: options, context: context)
         case let .fileList(values):
@@ -2425,7 +2482,7 @@ private indirect enum SearchPredicate {
         case let .fullPath(value):
             return fullPathScore(value: value, entry: entry, options: options, context: context)
         case let .pathPart(value):
-            return pathPartScore(value: value, entry: entry, options: options)
+            return pathPartScore(value: value, entry: entry, options: options, context: context)
         case let .name(value):
             return containsCached(
                 value: value,
@@ -3167,7 +3224,12 @@ private indirect enum SearchPredicate {
         return suffix.split(separator: "/", omittingEmptySubsequences: true).count
     }
 
-    private func pathPartScore(value: String, entry: FileEntry, options: SearchOptions) -> Int? {
+    private func pathPartScore(
+        value: String,
+        entry: FileEntry,
+        options: SearchOptions,
+        context: SearchContext
+    ) -> Int? {
         let resolvedValue = substituteSearchValue(value, entry: entry)
         guard !resolvedValue.isEmpty else {
             return 0
@@ -3187,7 +3249,7 @@ private indirect enum SearchPredicate {
                 .replacingOccurrences(of: "\\?", with: ".") + "$"
             return candidates.contains { candidate in
                 let normalizedCandidate = SearchEngine.normalize(candidate, options: options)
-                return matchesRegex(regex, in: normalizedCandidate, caseSensitive: true)
+                return matchesRegex(regex, in: normalizedCandidate, caseSensitive: true, context: context)
             } ? 8 : nil
         }
 
@@ -3300,7 +3362,12 @@ private indirect enum SearchPredicate {
         return paths
     }
 
-    private func wildcardScore(pattern: String, entry: FileEntry, options: SearchOptions) -> Int? {
+    private func wildcardScore(
+        pattern: String,
+        entry: FileEntry,
+        options: SearchOptions,
+        context: SearchContext
+    ) -> Int? {
         let resolvedPattern = substituteSearchValue(pattern, entry: entry)
         let normalizedPattern = SearchEngine.normalize(resolvedPattern, options: options)
         let normalizedName = SearchEngine.normalize(entry.name, options: options)
@@ -3311,7 +3378,7 @@ private indirect enum SearchPredicate {
         let candidates = wildcardCandidates(for: resolvedPattern, entry: entry, options: options)
         for candidate in candidates {
             let normalizedCandidate = SearchEngine.normalize(candidate, options: options)
-            if matchesRegex(regex, in: normalizedCandidate, caseSensitive: true) {
+            if matchesRegex(regex, in: normalizedCandidate, caseSensitive: true, context: context) {
                 return normalizedCandidate == normalizedName ? 6 : 22
             }
         }
@@ -3319,12 +3386,17 @@ private indirect enum SearchPredicate {
         return nil
     }
 
-    private func regexScore(pattern: String, entry: FileEntry, options: SearchOptions) -> Int? {
+    private func regexScore(
+        pattern: String,
+        entry: FileEntry,
+        options: SearchOptions,
+        context: SearchContext
+    ) -> Int? {
         let resolvedPattern = substituteSearchValue(pattern, entry: entry)
         let normalizedPattern = regexPattern(resolvedPattern, options: options)
         let candidates = regexCandidates(entry: entry, options: options)
         for (index, candidate) in candidates.enumerated() {
-            if matchesRegex(normalizedPattern, in: candidate, caseSensitive: options.caseSensitive) {
+            if matchesRegex(normalizedPattern, in: candidate, caseSensitive: options.caseSensitive, context: context) {
                 return index == 0 ? 5 : 20
             }
         }
@@ -3921,6 +3993,19 @@ private indirect enum SearchPredicate {
         } catch {
             return false
         }
+    }
+
+    private func matchesRegex(
+        _ pattern: String,
+        in candidate: String,
+        caseSensitive: Bool,
+        context: SearchContext
+    ) -> Bool {
+        guard let regex = context.regex(pattern: pattern, caseSensitive: caseSensitive) else {
+            return false
+        }
+        let range = NSRange(candidate.startIndex..<candidate.endIndex, in: candidate)
+        return regex.firstMatch(in: candidate, range: range) != nil
     }
 }
 
