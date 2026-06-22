@@ -235,7 +235,8 @@ The current packaged release is available from GitHub:
 - Global Option+Space hotkey opens a compact floating search palette.
 - Settings > Shortcuts provides an Everything-style key mapping table: click a
   shortcut field and press a new key combination, or use the preset menu for
-  quick choices and disabling.
+  quick choices and disabling. Application commands and search-option toggles
+  are grouped separately.
 - Global hotkey can be recorded directly or switched between presets such as
   Option Space, Control Option Space, Command Option Space, F13, or disabled.
 - The compact palette supports type-to-search, result selection, Enter to open,

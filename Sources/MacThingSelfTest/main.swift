@@ -75,6 +75,38 @@ expect(
     "custom app shortcut settings should clear duplicate command mappings"
 )
 
+let reassignedSearchOptionShortcuts = AppShortcutSettings.defaults
+    .setting(.commandOptionX, for: .toggleRegexMatching)
+    .setting(.commandOptionX, for: .toggleWholeWordMatching)
+expect(
+    reassignedSearchOptionShortcuts.choice(for: .toggleRegexMatching) == .disabled &&
+        reassignedSearchOptionShortcuts.choice(for: .toggleWholeWordMatching) == .commandOptionX,
+    "search option shortcut settings should clear duplicate command mappings"
+)
+
+let legacyShortcutSettingsData = Data(
+    """
+    {
+      "quickSearch": "commandOptionSpace",
+      "showWindow": "command1",
+      "reindex": "controlCommandR"
+    }
+    """.utf8
+)
+let decodedLegacyShortcutSettings = try! JSONDecoder().decode(
+    AppShortcutSettings.self,
+    from: legacyShortcutSettingsData
+)
+expect(
+    decodedLegacyShortcutSettings.choice(for: .quickSearch) == .commandOptionSpace &&
+        decodedLegacyShortcutSettings.choice(for: .showWindow) == .command1 &&
+        decodedLegacyShortcutSettings.choice(for: .reindex) == .controlCommandR &&
+        decodedLegacyShortcutSettings.choice(for: .toggleRegexMatching) == .disabled &&
+        decodedLegacyShortcutSettings.choice(for: .toggleWholeWordMatching) == .disabled &&
+        decodedLegacyShortcutSettings.choice(for: .toggleDiacriticSensitive) == .disabled,
+    "legacy shortcut settings should decode with defaults for newly added actions"
+)
+
 for action in AppShortcutAction.allCases {
     expect(
         action.availableChoices.contains(defaultShortcuts.choice(for: action)),
@@ -3309,14 +3341,22 @@ expect(
 
 let regexModifierHint = SearchEngine.candidateHint(for: SearchRequest(query: "regex:^launch"))
 expect(
-    regexModifierHint.canUseDatabaseCandidates == false,
-    "regex modifiers should avoid lossy SQLite candidate prefiltering"
+    regexModifierHint.canUseDatabaseCandidates &&
+        regexModifierHint.terms == ["launch"],
+    "anchored literal regex modifiers should preserve safe SQLite candidate terms"
 )
 
 let regexOptionHint = SearchEngine.candidateHint(for: SearchRequest(query: "^launch", options: SearchOptions(regexMatching: true)))
 expect(
-    regexOptionHint.canUseDatabaseCandidates == false,
-    "regex search option should avoid lossy SQLite candidate prefiltering"
+    regexOptionHint.canUseDatabaseCandidates &&
+        regexOptionHint.terms == ["launch"],
+    "anchored literal regex search options should preserve safe SQLite candidate terms"
+)
+
+let unsafeRegexHint = SearchEngine.candidateHint(for: SearchRequest(query: "regex:^launch|notes"))
+expect(
+    unsafeRegexHint.canUseDatabaseCandidates == false,
+    "regex alternation should avoid lossy SQLite candidate prefiltering"
 )
 
 let encodedContentHint = SearchEngine.candidateHint(for: SearchRequest(query: "utf16content:hello"))

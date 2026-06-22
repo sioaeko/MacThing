@@ -9,7 +9,7 @@ struct SettingsView: View {
                     Label("Shortcuts", systemImage: "keyboard")
                 }
         }
-        .frame(width: 680, height: 520)
+        .frame(width: 760, height: 620)
     }
 }
 
@@ -17,58 +17,85 @@ private struct ShortcutSettingsPane: View {
     @EnvironmentObject private var store: SearchStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .center, spacing: 12) {
-                Label("Key Mapping", systemImage: "keyboard")
-                    .font(.title3.weight(.semibold))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .center, spacing: 12) {
+                    Label("Key Mapping", systemImage: "keyboard")
+                        .font(.title3.weight(.semibold))
 
-                Spacer()
+                    Spacer()
 
-                Button {
-                    store.resetShortcutSettings()
-                } label: {
-                    Label("Reset Defaults", systemImage: "arrow.counterclockwise")
+                    Button {
+                        store.resetShortcutSettings()
+                    } label: {
+                        Label("Reset Defaults", systemImage: "arrow.counterclockwise")
+                    }
                 }
-            }
 
-            GroupBox("Global Hotkey") {
-                ShortcutMappingRow(
-                    title: "Quick Search",
-                    detail: "Open the floating search palette from anywhere",
-                    value: store.globalHotkeyChoice.shortcut,
-                    mode: .globalHotkey,
-                    presets: GlobalHotkeyChoice.allCases.map(\.shortcut)
-                ) { choice in
-                    store.setGlobalHotkeyChoice(GlobalHotkeyChoice(shortcut: choice))
+                GroupBox("Global Hotkey") {
+                    ShortcutMappingHeader()
+
+                    ShortcutMappingRow(
+                        title: "Quick Search",
+                        detail: "Open the floating search palette from anywhere",
+                        value: store.globalHotkeyChoice.shortcut,
+                        mode: .globalHotkey,
+                        presets: GlobalHotkeyChoice.allCases.map(\.shortcut)
+                    ) { choice in
+                        store.setGlobalHotkeyChoice(GlobalHotkeyChoice(shortcut: choice))
+                    }
                 }
-            }
 
-            GroupBox("Command Key Mapping") {
-                VStack(spacing: 0) {
-                    let actions = AppShortcutAction.allCases
-                    ForEach(actions.indices, id: \.self) { index in
-                        let action = actions[index]
+                ForEach(AppShortcutSection.allCases) { section in
+                    GroupBox(section.rawValue) {
+                        let actions = AppShortcutAction.allCases.filter { $0.settingsSection == section }
 
-                        ShortcutMappingRow(
-                            title: action.displayName,
-                            detail: action.settingDetail,
-                            value: store.appShortcutSettings.choice(for: action),
-                            mode: .menuCommand,
-                            presets: action.availableChoices
-                        ) { choice in
-                            store.setAppShortcutChoice(choice, for: action)
-                        }
+                        VStack(spacing: 0) {
+                            ShortcutMappingHeader()
 
-                        if index < actions.index(before: actions.endIndex) {
-                            Divider()
+                            ForEach(actions.indices, id: \.self) { index in
+                                let action = actions[index]
+
+                                ShortcutMappingRow(
+                                    title: action.displayName,
+                                    detail: action.settingDetail,
+                                    value: store.appShortcutSettings.choice(for: action),
+                                    mode: .menuCommand,
+                                    presets: action.availableChoices
+                                ) { choice in
+                                    store.setAppShortcutChoice(choice, for: action)
+                                }
+
+                                if index < actions.index(before: actions.endIndex) {
+                                    Divider()
+                                }
+                            }
                         }
                     }
                 }
-            }
 
-            Spacer(minLength: 0)
+                Spacer(minLength: 0)
+            }
+            .padding(20)
         }
-        .padding(20)
+    }
+}
+
+private struct ShortcutMappingHeader: View {
+    var body: some View {
+        HStack(spacing: 16) {
+            Text("Command")
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("Shortcut")
+                .frame(width: 172, alignment: .leading)
+            Text("Preset")
+                .frame(width: 28, alignment: .center)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 10)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
     }
 }
 

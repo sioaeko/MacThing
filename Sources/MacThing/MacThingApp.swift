@@ -47,6 +47,21 @@ struct MacThingApp: App {
                 }
                 .appKeyboardShortcut(store.appShortcutSettings.choice(for: .toggleCaseSensitive))
 
+                Button("Toggle Regex Matching") {
+                    store.toggleRegexMatching()
+                }
+                .appKeyboardShortcut(store.appShortcutSettings.choice(for: .toggleRegexMatching))
+
+                Button("Toggle Whole Word") {
+                    store.toggleWholeWordMatching()
+                }
+                .appKeyboardShortcut(store.appShortcutSettings.choice(for: .toggleWholeWordMatching))
+
+                Button("Toggle Diacritics") {
+                    store.toggleDiacriticSensitive()
+                }
+                .appKeyboardShortcut(store.appShortcutSettings.choice(for: .toggleDiacriticSensitive))
+
                 Button("Export Visible Results") {
                     store.exportVisibleResults()
                 }

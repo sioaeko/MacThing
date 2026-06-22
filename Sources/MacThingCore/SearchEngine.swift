@@ -721,6 +721,9 @@ public enum SearchEngine {
 
     public static func candidateHint(for request: SearchRequest) -> SearchCandidateHint {
         if request.options.regexMatching {
+            if let term = literalPrefixFromRegexPattern(request.query) {
+                return SearchCandidateHint(terms: [term], canUseDatabaseCandidates: true)
+            }
             return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
         }
         if request.query.contains("(") || request.query.contains(")") || containsAngleGrouping(in: request.query) {
@@ -823,7 +826,16 @@ public enum SearchEngine {
                 }
                 addTerm(value)
                 return true
-            case "regex", "wildcards":
+            case "regex":
+                guard !value.isEmpty else {
+                    return true
+                }
+                guard let term = literalPrefixFromRegexPattern(value) else {
+                    return false
+                }
+                addTerm(term)
+                return true
+            case "wildcards":
                 return value.isEmpty ? true : false
             case "nowildcards":
                 guard !value.isEmpty else {
@@ -1199,6 +1211,50 @@ public enum SearchEngine {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         return extensionName.isEmpty ? nil : extensionName
+    }
+
+    private static func literalPrefixFromRegexPattern(_ value: String) -> String? {
+        let pattern = unescapeQuotedListSeparators(value)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard pattern.hasPrefix("^") else {
+            return nil
+        }
+        guard !pattern.contains("|"),
+              !pattern.contains("("),
+              !pattern.contains("["),
+              !pattern.contains("{") else {
+            return nil
+        }
+
+        var literal = ""
+        var index = pattern.index(after: pattern.startIndex)
+        while index < pattern.endIndex {
+            let character = pattern[index]
+
+            if character == "\\" {
+                let nextIndex = pattern.index(after: index)
+                guard nextIndex < pattern.endIndex else {
+                    return nil
+                }
+
+                let escaped = pattern[nextIndex]
+                guard escaped.isLetter || escaped.isNumber || escaped == "_" || escaped == "-" || escaped == " " else {
+                    break
+                }
+                literal.append(escaped)
+                index = pattern.index(after: nextIndex)
+                continue
+            }
+
+            guard character.isLetter || character.isNumber || character == "_" || character == "-" || character == " " else {
+                break
+            }
+            literal.append(character)
+            index = pattern.index(after: index)
+        }
+
+        let trimmed = literal.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.count >= 2 ? trimmed : nil
     }
 
     static func parseDelimitedList(_ value: String) -> Set<String> {

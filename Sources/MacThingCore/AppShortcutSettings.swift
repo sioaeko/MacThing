@@ -7,9 +7,22 @@ public enum AppShortcutAction: String, Codable, CaseIterable, Identifiable, Send
     case toggleMatchPath
     case toggleFuzzyMatching
     case toggleCaseSensitive
+    case toggleRegexMatching
+    case toggleWholeWordMatching
+    case toggleDiacriticSensitive
     case exportVisibleResults
 
     public var id: String { rawValue }
+
+    public var settingsSection: AppShortcutSection {
+        switch self {
+        case .quickSearch, .showWindow, .reindex, .exportVisibleResults:
+            return .applicationCommands
+        case .toggleMatchPath, .toggleFuzzyMatching, .toggleCaseSensitive,
+             .toggleRegexMatching, .toggleWholeWordMatching, .toggleDiacriticSensitive:
+            return .searchOptionToggles
+        }
+    }
 
     public var displayName: String {
         switch self {
@@ -25,6 +38,12 @@ public enum AppShortcutAction: String, Codable, CaseIterable, Identifiable, Send
             return "Toggle Fuzzy Matching"
         case .toggleCaseSensitive:
             return "Toggle Case Sensitive"
+        case .toggleRegexMatching:
+            return "Toggle Regex Matching"
+        case .toggleWholeWordMatching:
+            return "Toggle Whole Word"
+        case .toggleDiacriticSensitive:
+            return "Toggle Diacritics"
         case .exportVisibleResults:
             return "Export Visible Results"
         }
@@ -44,6 +63,12 @@ public enum AppShortcutAction: String, Codable, CaseIterable, Identifiable, Send
             return "Switch fuzzy matching on or off"
         case .toggleCaseSensitive:
             return "Switch case-sensitive matching on or off"
+        case .toggleRegexMatching:
+            return "Switch regex matching on or off"
+        case .toggleWholeWordMatching:
+            return "Switch whole-word matching on or off"
+        case .toggleDiacriticSensitive:
+            return "Switch diacritic-sensitive matching on or off"
         case .exportVisibleResults:
             return "Export the current result list"
         }
@@ -96,6 +121,24 @@ public enum AppShortcutAction: String, Codable, CaseIterable, Identifiable, Send
                 .controlOptionC,
                 .disabled
             ]
+        case .toggleRegexMatching:
+            return [
+                .commandOptionX,
+                .controlOptionX,
+                .disabled
+            ]
+        case .toggleWholeWordMatching:
+            return [
+                .commandOptionW,
+                .controlOptionW,
+                .disabled
+            ]
+        case .toggleDiacriticSensitive:
+            return [
+                .commandOptionD,
+                .controlOptionD,
+                .disabled
+            ]
         case .exportVisibleResults:
             return [
                 .commandShiftE,
@@ -104,6 +147,13 @@ public enum AppShortcutAction: String, Codable, CaseIterable, Identifiable, Send
             ]
         }
     }
+}
+
+public enum AppShortcutSection: String, CaseIterable, Identifiable, Sendable {
+    case applicationCommands = "Application Commands"
+    case searchOptionToggles = "Search Option Toggles"
+
+    public var id: String { rawValue }
 }
 
 public struct AppShortcutModifierFlags: OptionSet, Codable, Hashable, Sendable {
@@ -449,6 +499,12 @@ public struct AppShortcutChoice: Codable, Hashable, Identifiable, Sendable {
     public static let controlOptionU = AppShortcutChoice(key: .u, modifiers: [.control, .option])
     public static let commandOptionC = AppShortcutChoice(key: .c, modifiers: [.command, .option])
     public static let controlOptionC = AppShortcutChoice(key: .c, modifiers: [.control, .option])
+    public static let commandOptionD = AppShortcutChoice(key: .d, modifiers: [.command, .option])
+    public static let controlOptionD = AppShortcutChoice(key: .d, modifiers: [.control, .option])
+    public static let commandOptionW = AppShortcutChoice(key: .w, modifiers: [.command, .option])
+    public static let controlOptionW = AppShortcutChoice(key: .w, modifiers: [.control, .option])
+    public static let commandOptionX = AppShortcutChoice(key: .x, modifiers: [.command, .option])
+    public static let controlOptionX = AppShortcutChoice(key: .x, modifiers: [.control, .option])
     public static let commandShiftE = AppShortcutChoice(key: .e, modifiers: [.command, .shift])
     public static let commandOptionE = AppShortcutChoice(key: .e, modifiers: [.command, .option])
     public static let f13 = AppShortcutChoice(key: .f13)
@@ -532,6 +588,12 @@ public struct AppShortcutChoice: Codable, Hashable, Identifiable, Sendable {
         "controlOptionU": .controlOptionU,
         "commandOptionC": .commandOptionC,
         "controlOptionC": .controlOptionC,
+        "commandOptionD": .commandOptionD,
+        "controlOptionD": .controlOptionD,
+        "commandOptionW": .commandOptionW,
+        "controlOptionW": .controlOptionW,
+        "commandOptionX": .commandOptionX,
+        "controlOptionX": .controlOptionX,
         "commandShiftE": .commandShiftE,
         "commandOptionE": .commandOptionE,
         "f13": .f13,
@@ -546,6 +608,9 @@ public struct AppShortcutSettings: Codable, Hashable, Sendable {
     public var toggleMatchPath: AppShortcutChoice
     public var toggleFuzzyMatching: AppShortcutChoice
     public var toggleCaseSensitive: AppShortcutChoice
+    public var toggleRegexMatching: AppShortcutChoice
+    public var toggleWholeWordMatching: AppShortcutChoice
+    public var toggleDiacriticSensitive: AppShortcutChoice
     public var exportVisibleResults: AppShortcutChoice
 
     public init(
@@ -555,6 +620,9 @@ public struct AppShortcutSettings: Codable, Hashable, Sendable {
         toggleMatchPath: AppShortcutChoice = .disabled,
         toggleFuzzyMatching: AppShortcutChoice = .disabled,
         toggleCaseSensitive: AppShortcutChoice = .disabled,
+        toggleRegexMatching: AppShortcutChoice = .disabled,
+        toggleWholeWordMatching: AppShortcutChoice = .disabled,
+        toggleDiacriticSensitive: AppShortcutChoice = .disabled,
         exportVisibleResults: AppShortcutChoice = .disabled
     ) {
         self.quickSearch = quickSearch
@@ -563,6 +631,9 @@ public struct AppShortcutSettings: Codable, Hashable, Sendable {
         self.toggleMatchPath = toggleMatchPath
         self.toggleFuzzyMatching = toggleFuzzyMatching
         self.toggleCaseSensitive = toggleCaseSensitive
+        self.toggleRegexMatching = toggleRegexMatching
+        self.toggleWholeWordMatching = toggleWholeWordMatching
+        self.toggleDiacriticSensitive = toggleDiacriticSensitive
         self.exportVisibleResults = exportVisibleResults
     }
 
@@ -582,6 +653,12 @@ public struct AppShortcutSettings: Codable, Hashable, Sendable {
             return toggleFuzzyMatching
         case .toggleCaseSensitive:
             return toggleCaseSensitive
+        case .toggleRegexMatching:
+            return toggleRegexMatching
+        case .toggleWholeWordMatching:
+            return toggleWholeWordMatching
+        case .toggleDiacriticSensitive:
+            return toggleDiacriticSensitive
         case .exportVisibleResults:
             return exportVisibleResults
         }
@@ -605,6 +682,12 @@ public struct AppShortcutSettings: Codable, Hashable, Sendable {
             toggleFuzzyMatching = choice
         case .toggleCaseSensitive:
             toggleCaseSensitive = choice
+        case .toggleRegexMatching:
+            toggleRegexMatching = choice
+        case .toggleWholeWordMatching:
+            toggleWholeWordMatching = choice
+        case .toggleDiacriticSensitive:
+            toggleDiacriticSensitive = choice
         case .exportVisibleResults:
             exportVisibleResults = choice
         }
@@ -639,8 +722,57 @@ public struct AppShortcutSettings: Codable, Hashable, Sendable {
             toggleFuzzyMatching = choice
         case .toggleCaseSensitive:
             toggleCaseSensitive = choice
+        case .toggleRegexMatching:
+            toggleRegexMatching = choice
+        case .toggleWholeWordMatching:
+            toggleWholeWordMatching = choice
+        case .toggleDiacriticSensitive:
+            toggleDiacriticSensitive = choice
         case .exportVisibleResults:
             exportVisibleResults = choice
         }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case quickSearch
+        case showWindow
+        case reindex
+        case toggleMatchPath
+        case toggleFuzzyMatching
+        case toggleCaseSensitive
+        case toggleRegexMatching
+        case toggleWholeWordMatching
+        case toggleDiacriticSensitive
+        case exportVisibleResults
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            quickSearch: try container.decodeIfPresent(AppShortcutChoice.self, forKey: .quickSearch) ?? .optionSpace,
+            showWindow: try container.decodeIfPresent(AppShortcutChoice.self, forKey: .showWindow) ?? .command0,
+            reindex: try container.decodeIfPresent(AppShortcutChoice.self, forKey: .reindex) ?? .commandShiftR,
+            toggleMatchPath: try container.decodeIfPresent(AppShortcutChoice.self, forKey: .toggleMatchPath) ?? .disabled,
+            toggleFuzzyMatching: try container.decodeIfPresent(AppShortcutChoice.self, forKey: .toggleFuzzyMatching) ?? .disabled,
+            toggleCaseSensitive: try container.decodeIfPresent(AppShortcutChoice.self, forKey: .toggleCaseSensitive) ?? .disabled,
+            toggleRegexMatching: try container.decodeIfPresent(AppShortcutChoice.self, forKey: .toggleRegexMatching) ?? .disabled,
+            toggleWholeWordMatching: try container.decodeIfPresent(AppShortcutChoice.self, forKey: .toggleWholeWordMatching) ?? .disabled,
+            toggleDiacriticSensitive: try container.decodeIfPresent(AppShortcutChoice.self, forKey: .toggleDiacriticSensitive) ?? .disabled,
+            exportVisibleResults: try container.decodeIfPresent(AppShortcutChoice.self, forKey: .exportVisibleResults) ?? .disabled
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(quickSearch, forKey: .quickSearch)
+        try container.encode(showWindow, forKey: .showWindow)
+        try container.encode(reindex, forKey: .reindex)
+        try container.encode(toggleMatchPath, forKey: .toggleMatchPath)
+        try container.encode(toggleFuzzyMatching, forKey: .toggleFuzzyMatching)
+        try container.encode(toggleCaseSensitive, forKey: .toggleCaseSensitive)
+        try container.encode(toggleRegexMatching, forKey: .toggleRegexMatching)
+        try container.encode(toggleWholeWordMatching, forKey: .toggleWholeWordMatching)
+        try container.encode(toggleDiacriticSensitive, forKey: .toggleDiacriticSensitive)
+        try container.encode(exportVisibleResults, forKey: .exportVisibleResults)
     }
 }
