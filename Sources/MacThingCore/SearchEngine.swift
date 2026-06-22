@@ -1857,6 +1857,10 @@ private struct SearchContext {
         normalizationCache.normalizedName(for: entry, options: options)
     }
 
+    func normalizedNamePart(for entry: FileEntry, options: SearchOptions) -> String {
+        normalizationCache.normalizedNamePart(for: entry, options: options)
+    }
+
     func normalizedPath(for entry: FileEntry, options: SearchOptions) -> String {
         normalizationCache.normalizedPath(for: entry, options: options)
     }
@@ -2057,11 +2061,13 @@ private final class SearchNormalizationCache {
     private let options: SearchOptions
     private var normalizedLiterals: [String: String] = [:]
     private var normalizedNamesByPath: [String: String] = [:]
+    private var normalizedNamePartsByPath: [String: String] = [:]
     private var normalizedPathsByPath: [String: String] = [:]
 
     init(options: SearchOptions, capacity: Int) {
         self.options = options
         normalizedNamesByPath.reserveCapacity(min(capacity, 8_192))
+        normalizedNamePartsByPath.reserveCapacity(min(capacity, 8_192))
         normalizedPathsByPath.reserveCapacity(min(capacity, 8_192))
     }
 
@@ -2088,6 +2094,19 @@ private final class SearchNormalizationCache {
 
         let normalized = SearchEngine.normalize(entry.name, options: options)
         normalizedNamesByPath[entry.path] = normalized
+        return normalized
+    }
+
+    func normalizedNamePart(for entry: FileEntry, options: SearchOptions) -> String {
+        guard options == self.options else {
+            return SearchEngine.normalize(entry.namePart, options: options)
+        }
+        if let cached = normalizedNamePartsByPath[entry.path] {
+            return cached
+        }
+
+        let normalized = SearchEngine.normalize(entry.namePart, options: options)
+        normalizedNamePartsByPath[entry.path] = normalized
         return normalized
     }
 
@@ -2396,15 +2415,33 @@ private indirect enum SearchPredicate {
         case .noExtension:
             return [.file, .symlink, .other].contains(entry.kind) && entry.extensionName.isEmpty ? 2 : nil
         case let .path(value):
-            return contains(substituteSearchValue(value, entry: entry), in: entry.path, options: options) ? 8 : nil
+            return containsCached(
+                value: value,
+                in: context.normalizedPath(for: entry, options: options),
+                entry: entry,
+                options: options,
+                context: context
+            ) ? 8 : nil
         case let .fullPath(value):
-            return fullPathScore(value: value, entry: entry, options: options)
+            return fullPathScore(value: value, entry: entry, options: options, context: context)
         case let .pathPart(value):
             return pathPartScore(value: value, entry: entry, options: options)
         case let .name(value):
-            return contains(substituteSearchValue(value, entry: entry), in: entry.name, options: options) ? 4 : nil
+            return containsCached(
+                value: value,
+                in: context.normalizedName(for: entry, options: options),
+                entry: entry,
+                options: options,
+                context: context
+            ) ? 4 : nil
         case let .namePart(value):
-            return contains(substituteSearchValue(value, entry: entry), in: entry.namePart, options: options) ? 4 : nil
+            return containsCached(
+                value: value,
+                in: context.normalizedNamePart(for: entry, options: options),
+                entry: entry,
+                options: options,
+                context: context
+            ) ? 4 : nil
         case let .mediaAlbum(value):
             return mediaTextScore(value: value, candidate: entry.mediaAlbum, entry: entry, options: options)
         case let .mediaArtist(value):
@@ -2865,7 +2902,12 @@ private indirect enum SearchPredicate {
         return regex
     }
 
-    private func fullPathScore(value: String, entry: FileEntry, options: SearchOptions) -> Int? {
+    private func fullPathScore(
+        value: String,
+        entry: FileEntry,
+        options: SearchOptions,
+        context: SearchContext
+    ) -> Int? {
         let resolvedValue = substituteSearchValue(value, entry: entry)
         let normalizedValue = SearchEngine.normalizedFolderPath(
             resolvedValue.replacingOccurrences(of: "\\", with: "/")
@@ -2883,7 +2925,12 @@ private indirect enum SearchPredicate {
             ) ? 8 : nil
         }
 
-        return contains(normalizedValue, in: entry.path, options: options) ? 8 : nil
+        return containsCached(
+            rawValue: normalizedValue,
+            in: context.normalizedPath(for: entry, options: options),
+            options: options,
+            context: context
+        ) ? 8 : nil
     }
 
     private func existsScore(
@@ -3803,6 +3850,34 @@ private indirect enum SearchPredicate {
     private func contains(_ needle: String, in haystack: String, options: SearchOptions) -> Bool {
         let normalizedNeedle = SearchEngine.normalize(needle, options: options)
         let normalizedHaystack = SearchEngine.normalize(haystack, options: options)
+        if options.wholeWordMatching {
+            return containsWholeWord(normalizedNeedle, in: normalizedHaystack)
+        }
+        return normalizedHaystack.contains(normalizedNeedle)
+    }
+
+    private func containsCached(
+        value: String,
+        in normalizedHaystack: String,
+        entry: FileEntry,
+        options: SearchOptions,
+        context: SearchContext
+    ) -> Bool {
+        containsCached(
+            rawValue: substituteSearchValue(value, entry: entry),
+            in: normalizedHaystack,
+            options: options,
+            context: context
+        )
+    }
+
+    private func containsCached(
+        rawValue: String,
+        in normalizedHaystack: String,
+        options: SearchOptions,
+        context: SearchContext
+    ) -> Bool {
+        let normalizedNeedle = context.normalizedLiteral(rawValue, options: options)
         if options.wholeWordMatching {
             return containsWholeWord(normalizedNeedle, in: normalizedHaystack)
         }
