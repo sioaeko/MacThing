@@ -3,6 +3,9 @@ import Foundation
 public enum AppShortcutAction: String, Codable, CaseIterable, Identifiable, Sendable {
     case quickSearch
     case showWindow
+    case openSelected
+    case revealSelected
+    case copySelectedPath
     case reindex
     case toggleMatchPath
     case toggleFuzzyMatching
@@ -18,6 +21,8 @@ public enum AppShortcutAction: String, Codable, CaseIterable, Identifiable, Send
         switch self {
         case .quickSearch, .showWindow, .reindex, .exportVisibleResults:
             return .applicationCommands
+        case .openSelected, .revealSelected, .copySelectedPath:
+            return .resultActions
         case .toggleMatchPath, .toggleFuzzyMatching, .toggleCaseSensitive,
              .toggleRegexMatching, .toggleWholeWordMatching, .toggleDiacriticSensitive:
             return .searchOptionToggles
@@ -30,6 +35,12 @@ public enum AppShortcutAction: String, Codable, CaseIterable, Identifiable, Send
             return "Quick Search"
         case .showWindow:
             return "Show Window"
+        case .openSelected:
+            return "Open Selected"
+        case .revealSelected:
+            return "Reveal in Finder"
+        case .copySelectedPath:
+            return "Copy Path"
         case .reindex:
             return "Reindex"
         case .toggleMatchPath:
@@ -55,6 +66,12 @@ public enum AppShortcutAction: String, Codable, CaseIterable, Identifiable, Send
             return "Open the floating search palette"
         case .showWindow:
             return "Bring the main MacThing window forward"
+        case .openSelected:
+            return "Open the selected result"
+        case .revealSelected:
+            return "Show the selected result in Finder"
+        case .copySelectedPath:
+            return "Copy the selected result path"
         case .reindex:
             return "Rebuild the enabled indexes"
         case .toggleMatchPath:
@@ -93,6 +110,27 @@ public enum AppShortcutAction: String, Codable, CaseIterable, Identifiable, Send
                 .command1,
                 .controlCommandSpace,
                 .controlCommandM,
+                .disabled
+            ]
+        case .openSelected:
+            return [
+                .commandO,
+                .commandReturn,
+                .commandDownArrow,
+                .disabled
+            ]
+        case .revealSelected:
+            return [
+                .commandR,
+                .commandOptionR,
+                .commandShiftG,
+                .disabled
+            ]
+        case .copySelectedPath:
+            return [
+                .commandOptionC,
+                .controlOptionC,
+                .commandShiftC,
                 .disabled
             ]
         case .reindex:
@@ -151,6 +189,7 @@ public enum AppShortcutAction: String, Codable, CaseIterable, Identifiable, Send
 
 public enum AppShortcutSection: String, CaseIterable, Identifiable, Sendable {
     case applicationCommands = "Application Commands"
+    case resultActions = "Result Actions"
     case searchOptionToggles = "Search Option Toggles"
 
     public var id: String { rawValue }
@@ -489,6 +528,12 @@ public struct AppShortcutChoice: Codable, Hashable, Identifiable, Sendable {
     public static let commandShiftF = AppShortcutChoice(key: .f, modifiers: [.command, .shift])
     public static let command0 = AppShortcutChoice(key: .zero, modifiers: [.command])
     public static let command1 = AppShortcutChoice(key: .one, modifiers: [.command])
+    public static let commandO = AppShortcutChoice(key: .o, modifiers: [.command])
+    public static let commandR = AppShortcutChoice(key: .r, modifiers: [.command])
+    public static let commandReturn = AppShortcutChoice(key: .returnKey, modifiers: [.command])
+    public static let commandDownArrow = AppShortcutChoice(key: .downArrow, modifiers: [.command])
+    public static let commandShiftG = AppShortcutChoice(key: .g, modifiers: [.command, .shift])
+    public static let commandShiftC = AppShortcutChoice(key: .c, modifiers: [.command, .shift])
     public static let controlCommandM = AppShortcutChoice(key: .m, modifiers: [.control, .command])
     public static let commandShiftR = AppShortcutChoice(key: .r, modifiers: [.command, .shift])
     public static let controlCommandR = AppShortcutChoice(key: .r, modifiers: [.control, .command])
@@ -578,6 +623,12 @@ public struct AppShortcutChoice: Codable, Hashable, Identifiable, Sendable {
         "commandShiftF": .commandShiftF,
         "command0": .command0,
         "command1": .command1,
+        "commandO": .commandO,
+        "commandR": .commandR,
+        "commandReturn": .commandReturn,
+        "commandDownArrow": .commandDownArrow,
+        "commandShiftG": .commandShiftG,
+        "commandShiftC": .commandShiftC,
         "controlCommandM": .controlCommandM,
         "commandShiftR": .commandShiftR,
         "controlCommandR": .controlCommandR,
@@ -604,6 +655,9 @@ public struct AppShortcutChoice: Codable, Hashable, Identifiable, Sendable {
 public struct AppShortcutSettings: Codable, Hashable, Sendable {
     public var quickSearch: AppShortcutChoice
     public var showWindow: AppShortcutChoice
+    public var openSelected: AppShortcutChoice
+    public var revealSelected: AppShortcutChoice
+    public var copySelectedPath: AppShortcutChoice
     public var reindex: AppShortcutChoice
     public var toggleMatchPath: AppShortcutChoice
     public var toggleFuzzyMatching: AppShortcutChoice
@@ -616,6 +670,9 @@ public struct AppShortcutSettings: Codable, Hashable, Sendable {
     public init(
         quickSearch: AppShortcutChoice = .optionSpace,
         showWindow: AppShortcutChoice = .command0,
+        openSelected: AppShortcutChoice = .disabled,
+        revealSelected: AppShortcutChoice = .disabled,
+        copySelectedPath: AppShortcutChoice = .disabled,
         reindex: AppShortcutChoice = .commandShiftR,
         toggleMatchPath: AppShortcutChoice = .disabled,
         toggleFuzzyMatching: AppShortcutChoice = .disabled,
@@ -627,6 +684,9 @@ public struct AppShortcutSettings: Codable, Hashable, Sendable {
     ) {
         self.quickSearch = quickSearch
         self.showWindow = showWindow
+        self.openSelected = openSelected
+        self.revealSelected = revealSelected
+        self.copySelectedPath = copySelectedPath
         self.reindex = reindex
         self.toggleMatchPath = toggleMatchPath
         self.toggleFuzzyMatching = toggleFuzzyMatching
@@ -645,6 +705,12 @@ public struct AppShortcutSettings: Codable, Hashable, Sendable {
             return quickSearch
         case .showWindow:
             return showWindow
+        case .openSelected:
+            return openSelected
+        case .revealSelected:
+            return revealSelected
+        case .copySelectedPath:
+            return copySelectedPath
         case .reindex:
             return reindex
         case .toggleMatchPath:
@@ -674,6 +740,12 @@ public struct AppShortcutSettings: Codable, Hashable, Sendable {
             quickSearch = choice
         case .showWindow:
             showWindow = choice
+        case .openSelected:
+            openSelected = choice
+        case .revealSelected:
+            revealSelected = choice
+        case .copySelectedPath:
+            copySelectedPath = choice
         case .reindex:
             reindex = choice
         case .toggleMatchPath:
@@ -714,6 +786,12 @@ public struct AppShortcutSettings: Codable, Hashable, Sendable {
             quickSearch = choice
         case .showWindow:
             showWindow = choice
+        case .openSelected:
+            openSelected = choice
+        case .revealSelected:
+            revealSelected = choice
+        case .copySelectedPath:
+            copySelectedPath = choice
         case .reindex:
             reindex = choice
         case .toggleMatchPath:
@@ -736,6 +814,9 @@ public struct AppShortcutSettings: Codable, Hashable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case quickSearch
         case showWindow
+        case openSelected
+        case revealSelected
+        case copySelectedPath
         case reindex
         case toggleMatchPath
         case toggleFuzzyMatching
@@ -751,6 +832,9 @@ public struct AppShortcutSettings: Codable, Hashable, Sendable {
         self.init(
             quickSearch: try container.decodeIfPresent(AppShortcutChoice.self, forKey: .quickSearch) ?? .optionSpace,
             showWindow: try container.decodeIfPresent(AppShortcutChoice.self, forKey: .showWindow) ?? .command0,
+            openSelected: try container.decodeIfPresent(AppShortcutChoice.self, forKey: .openSelected) ?? .disabled,
+            revealSelected: try container.decodeIfPresent(AppShortcutChoice.self, forKey: .revealSelected) ?? .disabled,
+            copySelectedPath: try container.decodeIfPresent(AppShortcutChoice.self, forKey: .copySelectedPath) ?? .disabled,
             reindex: try container.decodeIfPresent(AppShortcutChoice.self, forKey: .reindex) ?? .commandShiftR,
             toggleMatchPath: try container.decodeIfPresent(AppShortcutChoice.self, forKey: .toggleMatchPath) ?? .disabled,
             toggleFuzzyMatching: try container.decodeIfPresent(AppShortcutChoice.self, forKey: .toggleFuzzyMatching) ?? .disabled,
@@ -766,6 +850,9 @@ public struct AppShortcutSettings: Codable, Hashable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(quickSearch, forKey: .quickSearch)
         try container.encode(showWindow, forKey: .showWindow)
+        try container.encode(openSelected, forKey: .openSelected)
+        try container.encode(revealSelected, forKey: .revealSelected)
+        try container.encode(copySelectedPath, forKey: .copySelectedPath)
         try container.encode(reindex, forKey: .reindex)
         try container.encode(toggleMatchPath, forKey: .toggleMatchPath)
         try container.encode(toggleFuzzyMatching, forKey: .toggleFuzzyMatching)

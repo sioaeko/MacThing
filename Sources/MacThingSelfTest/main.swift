@@ -84,6 +84,15 @@ expect(
     "search option shortcut settings should clear duplicate command mappings"
 )
 
+let reassignedResultActionShortcuts = AppShortcutSettings.defaults
+    .setting(.commandOptionC, for: .copySelectedPath)
+    .setting(.commandOptionC, for: .toggleCaseSensitive)
+expect(
+    reassignedResultActionShortcuts.choice(for: .copySelectedPath) == .disabled &&
+        reassignedResultActionShortcuts.choice(for: .toggleCaseSensitive) == .commandOptionC,
+    "result action shortcut settings should participate in duplicate clearing"
+)
+
 let legacyShortcutSettingsData = Data(
     """
     {
@@ -100,6 +109,9 @@ let decodedLegacyShortcutSettings = try! JSONDecoder().decode(
 expect(
     decodedLegacyShortcutSettings.choice(for: .quickSearch) == .commandOptionSpace &&
         decodedLegacyShortcutSettings.choice(for: .showWindow) == .command1 &&
+        decodedLegacyShortcutSettings.choice(for: .openSelected) == .disabled &&
+        decodedLegacyShortcutSettings.choice(for: .revealSelected) == .disabled &&
+        decodedLegacyShortcutSettings.choice(for: .copySelectedPath) == .disabled &&
         decodedLegacyShortcutSettings.choice(for: .reindex) == .controlCommandR &&
         decodedLegacyShortcutSettings.choice(for: .toggleRegexMatching) == .disabled &&
         decodedLegacyShortcutSettings.choice(for: .toggleWholeWordMatching) == .disabled &&

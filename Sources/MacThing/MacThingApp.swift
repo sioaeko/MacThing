@@ -27,6 +27,24 @@ struct MacThingApp: App {
                 }
                 .appKeyboardShortcut(store.appShortcutSettings.choice(for: .showWindow))
 
+                Button("Open Selected") {
+                    store.openSelected()
+                }
+                .disabled(store.selectedEntry == nil)
+                .appKeyboardShortcut(store.appShortcutSettings.choice(for: .openSelected))
+
+                Button("Reveal in Finder") {
+                    store.revealSelected()
+                }
+                .disabled(store.selectedEntry == nil)
+                .appKeyboardShortcut(store.appShortcutSettings.choice(for: .revealSelected))
+
+                Button("Copy Path") {
+                    store.copySelectedPath()
+                }
+                .disabled(store.selectedEntry == nil)
+                .appKeyboardShortcut(store.appShortcutSettings.choice(for: .copySelectedPath))
+
                 Button("Reindex") {
                     store.reindexCurrentRoot()
                 }
