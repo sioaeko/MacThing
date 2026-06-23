@@ -501,8 +501,27 @@ private final class SQLiteDatabase {
     }
 
     private func likeCandidateEntries(hint: SearchCandidateHint, limit: Int) throws -> [FileEntry] {
+        guard !hint.terms.isEmpty else {
+            return try likeCandidateEntries(hint: hint, columns: [], limit: limit)
+        }
+
+        var candidates = try likeCandidateEntries(hint: hint, columns: ["name"], limit: limit)
+        if candidates.count >= min(limit, 1_000) {
+            return uniqueEntries(candidates)
+        }
+
+        candidates.append(contentsOf: try likeCandidateEntries(hint: hint, columns: ["parent", "path"], limit: limit))
+        return uniqueEntries(candidates)
+    }
+
+    private func likeCandidateEntries(
+        hint: SearchCandidateHint,
+        columns: [String],
+        limit: Int
+    ) throws -> [FileEntry] {
         var clauses = hint.terms.map { _ in
-            "(name LIKE ? ESCAPE '\\' OR parent LIKE ? ESCAPE '\\' OR path LIKE ? ESCAPE '\\')"
+            let columnClauses = columns.map { "\($0) LIKE ? ESCAPE '\\'" }
+            return "(\(columnClauses.joined(separator: " OR ")))"
         }
         let filter = candidateFilter(for: hint, tablePrefix: nil)
         if let filterClause = filter.clause {
@@ -520,7 +539,7 @@ private final class SQLiteDatabase {
             """
         let bindings = hint.terms.flatMap { term -> [SQLiteValue] in
             let like = "%\(escapeLike(term))%"
-            return [.text(like), .text(like), .text(like)]
+            return Array(repeating: .text(like), count: columns.count)
         } + filter.bindings
 
         return try query(sql, bindings: bindings) { statement in

@@ -82,6 +82,8 @@ The current packaged release is available from GitHub:
   pruning is active.
 - SQLite candidate windows adapt to query specificity, keeping very short
   searches broad while trimming more specific terms and structured filters.
+- Short substring fallback searches try file-name candidates before expanding
+  to parent/path candidates, reducing slow path scans for common short terms.
 - SQLite candidate seeding also applies supported structured filters such as
   extension, kind/category, file size, dates, and file attributes when they are
   combined with text terms.

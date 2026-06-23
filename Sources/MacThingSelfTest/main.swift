@@ -4787,6 +4787,22 @@ do {
         "SQLite index storage should upsert changed entries"
     )
 
+    let parentOnlyCandidate = FileEntry(
+        path: "/Users/me/ParentOnly/Other.txt",
+        name: "Other.txt",
+        parent: "/Users/me/ParentOnly",
+        kind: .file,
+        byteSize: 512,
+        modifiedAt: Date(timeIntervalSince1970: 2_700),
+        indexedAt: Date(timeIntervalSince1970: 2_700)
+    )
+    try IndexStorage.upsert(entries: [parentOnlyCandidate], rootPath: temporaryDirectory.path, to: databaseURL)
+    let parentOnlyCandidates = try IndexStorage.candidateEntries(terms: ["ar"], limit: 20, from: databaseURL)
+    expect(
+        parentOnlyCandidates.contains { $0.path == parentOnlyCandidate.path },
+        "SQLite LIKE fallback should preserve short parent/path substring candidates"
+    )
+
     let candidates = try IndexStorage.candidateEntries(terms: ["Launch"], limit: 20, from: databaseURL)
     expect(
         candidates.contains { $0.path == document.path } &&
