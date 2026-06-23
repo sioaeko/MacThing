@@ -416,7 +416,10 @@ private struct MoreMenu: View {
                     Label("Full Disk Access", systemImage: "lock.shield")
                 }
 
-                if !store.permissionIssues.isEmpty {
+                if store.permissionIssues.isEmpty {
+                    Divider()
+                    Text("No indexing issues found")
+                } else {
                     Divider()
 
                     ForEach(store.permissionIssues) { issue in
@@ -1061,6 +1064,7 @@ private struct StatusBar: View {
                 Text(store.permissionIssues.first?.title ?? "Permissions")
                     .foregroundStyle(.orange)
                     .lineLimit(1)
+                    .help(store.permissionIssues.map { "\($0.title): \($0.detail)" }.joined(separator: "\n"))
             }
 
             if let indexFreshnessWarning = store.indexFreshnessWarning {

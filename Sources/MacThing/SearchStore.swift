@@ -399,6 +399,13 @@ final class SearchStore: ObservableObject {
         indexProfiles.filter(\.isEnabled).count
     }
 
+    private var enabledProfileRootPaths: [String] {
+        let roots = indexProfiles
+            .filter(\.isEnabled)
+            .map(\.rootPath)
+        return roots.isEmpty ? [rootPath] : roots
+    }
+
     private var activeIndexURL: URL? {
         guard let activeProfileID else {
             return try? IndexStorage.defaultIndexURL()
@@ -607,7 +614,10 @@ final class SearchStore: ObservableObject {
     }
 
     func refreshPermissionDiagnostics() {
-        permissionIssues = PermissionDiagnostics.fullDiskAccessIssues()
+        permissionIssues = PermissionDiagnostics.indexingIssues(
+            rootPath: rootPath,
+            profileRootPaths: enabledProfileRootPaths
+        )
     }
 
     func openFullDiskAccessSettings() {
@@ -636,6 +646,7 @@ final class SearchStore: ObservableObject {
         activeProfileID = profile.id
         rootPath = profile.rootPath
         saveSettings()
+        refreshPermissionDiagnostics()
         loadPersistedIndex()
         startMonitoringEnabledProfiles()
         scheduleSearch()
@@ -671,6 +682,7 @@ final class SearchStore: ObservableObject {
         if activeProfileID == profile.id {
             activeProfileID = indexProfiles.first?.id
             rootPath = indexProfiles.first?.rootPath ?? NSHomeDirectory()
+            refreshPermissionDiagnostics()
             loadPersistedIndex()
             startMonitoringEnabledProfiles()
             scheduleSearch()
@@ -678,6 +690,7 @@ final class SearchStore: ObservableObject {
         saveIndexProfiles()
         saveSettings()
         startMonitoringEnabledProfiles()
+        refreshPermissionDiagnostics()
         statusText = "Profile removed"
     }
 
@@ -704,6 +717,7 @@ final class SearchStore: ObservableObject {
 
         saveIndexProfiles()
         rebuildEntriesFromIndexes()
+        refreshPermissionDiagnostics()
         updateQueryServiceState()
         startMonitoringEnabledProfiles()
         scheduleSearch()
@@ -1379,6 +1393,7 @@ final class SearchStore: ObservableObject {
         rebuildEntriesFromIndexes()
         storedIndexedCount = entries.count
         lastIndexedAt = snapshot.createdAt
+        refreshPermissionDiagnostics()
         statusText = "Loaded \(entries.count.formatted()) saved items\(enabledProfileCount > 1 ? " across \(enabledProfileCount) profiles" : "")"
         updateQueryServiceState()
     }
@@ -1743,6 +1758,7 @@ final class SearchStore: ObservableObject {
         }
         activeProfileID = profile.id
         self.rootPath = profile.rootPath
+        refreshPermissionDiagnostics()
         saveSettings()
     }
 

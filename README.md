@@ -224,8 +224,8 @@ The current packaged release is available from GitHub:
 - Index profiles track the last seen FSEvents event ID while running, but app
   launch resumes monitoring from the current event stream so old backlog does
   not trigger a full refresh on every start.
-- Diagnostics menu checks common protected locations and opens Full Disk Access
-  settings when indexing appears incomplete.
+- Diagnostics menu checks active/indexed roots, common protected locations, and
+  opens Full Disk Access settings when indexing appears incomplete.
 - Run count is updated when opening a result.
 - Search settings such as root, query, filter, sort, and matching options are
   persisted between launches.
