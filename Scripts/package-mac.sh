@@ -7,6 +7,9 @@ BUNDLE_ID="${BUNDLE_ID:-com.shibuki.MacThing}"
 VERSION="${VERSION:-0.1.3}"
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
 CONFIGURATION="${CONFIGURATION:-release}"
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-auto}"
+CODESIGN_RUNTIME="${CODESIGN_RUNTIME:-0}"
+CODESIGN_TIMESTAMP="${CODESIGN_TIMESTAMP:-0}"
 
 DIST_DIR="$ROOT_DIR/dist"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
@@ -52,6 +55,11 @@ find_ictool() {
     done
 
     find /Volumes -path '*/Icon Composer.app/Contents/Executables/ictool' -print -quit 2>/dev/null
+}
+
+find_codesign_identity() {
+    security find-identity -v -p codesigning 2>/dev/null |
+        awk -F\" '/Developer ID Application|Apple Development|Mac Developer/ { print $2; exit }'
 }
 
 ICTOOL_PATH="$(find_ictool)"
@@ -145,8 +153,55 @@ EOF
 printf "APPLMCTH" > "$APP_BUNDLE/Contents/PkgInfo"
 plutil -lint "$APP_BUNDLE/Contents/Info.plist"
 
-if command -v codesign >/dev/null 2>&1; then
-    codesign --force --deep --sign - "$APP_BUNDLE"
+SIGNING_IDENTITY=""
+if [[ "$CODESIGN_IDENTITY" == "skip" ]]; then
+    echo "warning: skipping code signing; macOS may refuse to launch the app bundle" >&2
+elif command -v codesign >/dev/null 2>&1; then
+    case "$CODESIGN_IDENTITY" in
+        auto)
+            SIGNING_IDENTITY="$(find_codesign_identity || true)"
+            if [[ -z "$SIGNING_IDENTITY" ]]; then
+                SIGNING_IDENTITY="-"
+                echo "warning: no valid code signing identity found; using ad-hoc signing" >&2
+                echo "warning: recent macOS builds may block ad-hoc app bundles at launch" >&2
+            fi
+            ;;
+        adhoc|-)
+            SIGNING_IDENTITY="-"
+            ;;
+        *)
+            SIGNING_IDENTITY="$CODESIGN_IDENTITY"
+            ;;
+    esac
+
+    codesign_args=(--force --deep --sign "$SIGNING_IDENTITY")
+    if [[ "$SIGNING_IDENTITY" != "-" ]]; then
+        if [[ "$CODESIGN_TIMESTAMP" == "1" ]]; then
+            codesign_args+=(--timestamp)
+        else
+            codesign_args+=(--timestamp=none)
+        fi
+        if [[ "$CODESIGN_RUNTIME" == "1" ]]; then
+            codesign_args+=(--options runtime)
+        fi
+    fi
+
+    codesign "${codesign_args[@]}" "$APP_BUNDLE"
+    if [[ "$SIGNING_IDENTITY" == "-" ]]; then
+        echo "Signed with: ad-hoc" >&2
+    else
+        echo "Signed with: $SIGNING_IDENTITY" >&2
+    fi
+else
+    echo "warning: codesign not found; app bundle was not signed" >&2
+fi
+
+if command -v spctl >/dev/null 2>&1 && [[ "${SKIP_SPCTL_ASSESS:-0}" != "1" ]]; then
+    if spctl --assess --type execute "$APP_BUNDLE" >/dev/null 2>&1; then
+        echo "Gatekeeper assessment: accepted" >&2
+    else
+        echo "warning: Gatekeeper assessment did not accept $APP_BUNDLE" >&2
+    fi
 fi
 
 mkdir -p "$STAGING_DIR"

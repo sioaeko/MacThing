@@ -288,8 +288,8 @@ swift run MacThingCLI -- search swift -sort dm -order desc -csv
 
 ## Package
 
-Build a release app bundle, generate the bundled icon, ad-hoc sign the app, and
-create a compressed DMG:
+Build a release app bundle, generate the bundled icon, sign the app, and create
+a compressed DMG:
 
 ```sh
 chmod +x Scripts/package-mac.sh
@@ -315,6 +315,26 @@ Override release metadata when needed:
 VERSION=0.2.0 BUILD_NUMBER=7 BUNDLE_ID=com.example.MacThing Scripts/package-mac.sh
 ```
 
+Signing defaults to `CODESIGN_IDENTITY=auto`, which uses the first available
+Developer ID, Apple Development, or Mac Developer identity. If no identity is
+installed, the script falls back to ad-hoc signing and prints a warning because
+recent macOS builds can refuse to launch ad-hoc app bundles.
+
+```sh
+CODESIGN_IDENTITY="Developer ID Application: Example, Inc. (TEAMID)" Scripts/package-mac.sh
+CODESIGN_IDENTITY=adhoc Scripts/package-mac.sh
+```
+
+For notarized releases, sign with a Developer ID identity and enable the
+hardened runtime/timestamp:
+
+```sh
+CODESIGN_IDENTITY="Developer ID Application: Example, Inc. (TEAMID)" \
+  CODESIGN_RUNTIME=1 \
+  CODESIGN_TIMESTAMP=1 \
+  Scripts/package-mac.sh
+```
+
 ## Verify
 
 ```sh
@@ -331,8 +351,8 @@ ranking behavior through a normal executable target instead.
 1. Add inode-aware rename/move pairing for even tighter FSEvents updates.
 2. Push more Everything query functions into SQLite candidate pruning for large
    indexes while preserving substring-search correctness.
-3. Add hardened Developer ID signing, notarization, and a first-run onboarding
-   checklist for release builds.
+3. Automate notarization and add a first-run onboarding checklist for release
+   builds.
 4. Add deeper permission diagnostics with per-location read probes and guided
    remediation.
 5. Add per-file-list scheduling, remote refresh, and conflict diagnostics.
