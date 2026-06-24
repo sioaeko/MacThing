@@ -2944,6 +2944,20 @@ expect(
     "date-run filters should be pushed into SQLite candidate hints"
 )
 
+let unknownDateHint = SearchEngine.candidateHint(for: SearchRequest(query: "dm:unknown"))
+expect(
+    unknownDateHint.canUseDatabaseCandidates &&
+        unknownDateHint.unknownDateFields == [.dateModified],
+    "dm:unknown should be pushed into SQLite null-date candidate hints"
+)
+
+let unknownDateAliasHint = SearchEngine.candidateHint(for: SearchRequest(query: "date-created:unknown"))
+expect(
+    unknownDateAliasHint.canUseDatabaseCandidates &&
+        unknownDateAliasHint.unknownDateFields == [.dateCreated],
+    "date-created:unknown should be pushed into SQLite null-date candidate hints"
+)
+
 let runCountHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch runcount:>1"))
 expect(
     runCountHint.canUseDatabaseCandidates &&
@@ -5319,6 +5333,21 @@ do {
     expect(
         todayLaunchCandidates.map(\.path) == [photo.path],
         "SQLite candidate search should apply date filters"
+    )
+
+    let unknownDateCandidateDatabaseURL = temporaryDirectory.appending(path: "UnknownDateCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: "/Users/me", entries: [compactMatch, relativeRecent]),
+        to: unknownDateCandidateDatabaseURL
+    )
+    let unknownDateCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "dm:unknown")),
+        limit: 20,
+        from: unknownDateCandidateDatabaseURL
+    )
+    expect(
+        unknownDateCandidates.map(\.path) == [compactMatch.path],
+        "SQLite candidate search should apply unknown modified-date filters"
     )
 
     try IndexStorage.upsert(entries: [otherMediaTaggedEntry], rootPath: temporaryDirectory.path, to: databaseURL)

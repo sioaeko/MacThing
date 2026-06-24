@@ -607,6 +607,10 @@ private final class SQLiteDatabase {
             bindings.append(.date(filter.value))
         }
 
+        for field in hint.unknownDateFields.sorted(by: { $0.rawValue < $1.rawValue }) {
+            clauses.append("\(prefix)\(column(for: field)) IS NULL")
+        }
+
         for filter in hint.mediaTextFilters {
             let column = "\(prefix)\(column(for: filter.field))"
             if filter.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

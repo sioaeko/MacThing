@@ -534,7 +534,7 @@ public enum SearchCandidateNumericField: String, Sendable {
     case depth
 }
 
-public enum SearchCandidateDateField: String, Sendable {
+public enum SearchCandidateDateField: String, Hashable, Sendable {
     case dateModified
     case dateCreated
     case dateAccessed
@@ -604,6 +604,7 @@ public struct SearchCandidateHint: Sendable {
     public let numericFilters: [SearchCandidateNumericFilter]
     public let requiresUnknownByteSize: Bool
     public let dateFilters: [SearchCandidateDateFilter]
+    public let unknownDateFields: Set<SearchCandidateDateField>
     public let mediaTextFilters: [SearchCandidateMediaTextFilter]
     public let fileReferenceFilter: SearchCandidateFileReferenceFilter?
     public let requiresFileListSource: Bool
@@ -620,6 +621,7 @@ public struct SearchCandidateHint: Sendable {
         numericFilters: [SearchCandidateNumericFilter] = [],
         requiresUnknownByteSize: Bool = false,
         dateFilters: [SearchCandidateDateFilter] = [],
+        unknownDateFields: Set<SearchCandidateDateField> = [],
         mediaTextFilters: [SearchCandidateMediaTextFilter] = [],
         fileReferenceFilter: SearchCandidateFileReferenceFilter? = nil,
         requiresFileListSource: Bool = false,
@@ -635,6 +637,7 @@ public struct SearchCandidateHint: Sendable {
         self.numericFilters = numericFilters
         self.requiresUnknownByteSize = requiresUnknownByteSize
         self.dateFilters = dateFilters
+        self.unknownDateFields = unknownDateFields
         self.mediaTextFilters = mediaTextFilters
         self.fileReferenceFilter = fileReferenceFilter
         self.requiresFileListSource = requiresFileListSource
@@ -650,6 +653,7 @@ public struct SearchCandidateHint: Sendable {
             !numericFilters.isEmpty ||
             requiresUnknownByteSize ||
             !dateFilters.isEmpty ||
+            !unknownDateFields.isEmpty ||
             !mediaTextFilters.isEmpty ||
             fileReferenceFilter != nil ||
             requiresFileListSource ||
@@ -839,6 +843,7 @@ public enum SearchEngine {
         var numericFilters: [SearchCandidateNumericFilter] = []
         var requiresUnknownByteSize = false
         var dateFilters: [SearchCandidateDateFilter] = []
+        var unknownDateFields = Set<SearchCandidateDateField>()
         var mediaTextFilters: [SearchCandidateMediaTextFilter] = []
         var fileReferenceFilter: SearchCandidateFileReferenceFilter?
         var requiresFileListSource = false
@@ -999,6 +1004,18 @@ public enum SearchEngine {
             }
         }
 
+        func addDateCandidateHint(value: String, field: SearchCandidateDateField) -> Bool {
+            if canonicalSearchFunctionName(value.trimmingCharacters(in: .whitespacesAndNewlines)) == "unknown" {
+                unknownDateFields.insert(field)
+                return true
+            }
+            guard let filter = DateFilter.parse(value) else {
+                return false
+            }
+            dateFilters.append(contentsOf: filter.candidateFilters(field: field))
+            return true
+        }
+
         for rawToken in tokens {
             if rawToken == "|" || rawToken.localizedCaseInsensitiveCompare("OR") == .orderedSame {
                 return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
@@ -1125,30 +1142,25 @@ public enum SearchEngine {
                     }
                     numericFilters.append(contentsOf: filter.candidateFilters(field: .byteSize))
                 case "dm", "datemodified", "datemodifieddate", "date":
-                    guard let filter = DateFilter.parse(value) else {
+                    guard addDateCandidateHint(value: value, field: .dateModified) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
-                    dateFilters.append(contentsOf: filter.candidateFilters(field: .dateModified))
                 case "dc", "datecreated", "datecreateddate":
-                    guard let filter = DateFilter.parse(value) else {
+                    guard addDateCandidateHint(value: value, field: .dateCreated) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
-                    dateFilters.append(contentsOf: filter.candidateFilters(field: .dateCreated))
                 case "da", "dateaccessed", "dateaccesseddate":
-                    guard let filter = DateFilter.parse(value) else {
+                    guard addDateCandidateHint(value: value, field: .dateAccessed) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
-                    dateFilters.append(contentsOf: filter.candidateFilters(field: .dateAccessed))
                 case "dr", "daterun":
-                    guard let filter = DateFilter.parse(value) else {
+                    guard addDateCandidateHint(value: value, field: .dateRun) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
-                    dateFilters.append(contentsOf: filter.candidateFilters(field: .dateRun))
                 case "rc", "recentchange":
-                    guard let filter = DateFilter.parse(value) else {
+                    guard addDateCandidateHint(value: value, field: .dateIndexed) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
-                    dateFilters.append(contentsOf: filter.candidateFilters(field: .dateIndexed))
                 case "runcount", "runs":
                     guard let filter = ComparisonFilter<Int64>.parse(value, valueParser: { Int64($0) }) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
@@ -1357,6 +1369,7 @@ public enum SearchEngine {
             !numericFilters.isEmpty ||
             requiresUnknownByteSize ||
             !dateFilters.isEmpty ||
+            !unknownDateFields.isEmpty ||
             !mediaTextFilters.isEmpty ||
             fileReferenceFilter != nil ||
             requiresFileListSource ||
@@ -1372,6 +1385,7 @@ public enum SearchEngine {
             numericFilters: numericFilters,
             requiresUnknownByteSize: requiresUnknownByteSize,
             dateFilters: dateFilters,
+            unknownDateFields: unknownDateFields,
             mediaTextFilters: mediaTextFilters,
             fileReferenceFilter: fileReferenceFilter,
             requiresFileListSource: requiresFileListSource,
