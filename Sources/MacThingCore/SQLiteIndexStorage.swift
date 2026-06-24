@@ -598,6 +598,10 @@ private final class SQLiteDatabase {
             bindings.append(.int(filter.value))
         }
 
+        if hint.requiresUnknownByteSize {
+            clauses.append("\(prefix)byte_size IS NULL")
+        }
+
         for filter in hint.dateFilters {
             clauses.append("\(prefix)\(column(for: filter.field)) \(sqlOperator(for: filter.op)) ?")
             bindings.append(.date(filter.value))

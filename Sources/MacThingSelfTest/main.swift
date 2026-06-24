@@ -2868,6 +2868,13 @@ expect(
     "size constants should be pushed into SQLite candidate hints"
 )
 
+let unknownSizeHint = SearchEngine.candidateHint(for: SearchRequest(query: "size:unknown"))
+expect(
+    unknownSizeHint.canUseDatabaseCandidates &&
+        unknownSizeHint.requiresUnknownByteSize,
+    "size:unknown should be pushed into SQLite null-size candidate hints"
+)
+
 let functionListHint = SearchEngine.candidateHint(for: SearchRequest(query: "stem:Launch;Notes"))
 expect(
     functionListHint.canUseDatabaseCandidates == false,
@@ -5290,6 +5297,21 @@ do {
     expect(
         notEqualLaunchCandidates.map(\.path) == [photo.path],
         "SQLite candidate search should apply not-equal size filters"
+    )
+
+    let unknownSizeCandidateDatabaseURL = temporaryDirectory.appending(path: "UnknownSizeCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: "/Users/me", entries: [folder, document]),
+        to: unknownSizeCandidateDatabaseURL
+    )
+    let unknownSizeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "size:unknown")),
+        limit: 20,
+        from: unknownSizeCandidateDatabaseURL
+    )
+    expect(
+        unknownSizeCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply unknown size filters"
     )
 
     let todayLaunchHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch dm:today"))

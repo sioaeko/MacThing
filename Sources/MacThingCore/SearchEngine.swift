@@ -602,6 +602,7 @@ public struct SearchCandidateHint: Sendable {
     public let requiredAttributes: FileAttributes
     public let excludedAttributes: FileAttributes
     public let numericFilters: [SearchCandidateNumericFilter]
+    public let requiresUnknownByteSize: Bool
     public let dateFilters: [SearchCandidateDateFilter]
     public let mediaTextFilters: [SearchCandidateMediaTextFilter]
     public let fileReferenceFilter: SearchCandidateFileReferenceFilter?
@@ -617,6 +618,7 @@ public struct SearchCandidateHint: Sendable {
         requiredAttributes: FileAttributes = [],
         excludedAttributes: FileAttributes = [],
         numericFilters: [SearchCandidateNumericFilter] = [],
+        requiresUnknownByteSize: Bool = false,
         dateFilters: [SearchCandidateDateFilter] = [],
         mediaTextFilters: [SearchCandidateMediaTextFilter] = [],
         fileReferenceFilter: SearchCandidateFileReferenceFilter? = nil,
@@ -631,6 +633,7 @@ public struct SearchCandidateHint: Sendable {
         self.requiredAttributes = requiredAttributes
         self.excludedAttributes = excludedAttributes
         self.numericFilters = numericFilters
+        self.requiresUnknownByteSize = requiresUnknownByteSize
         self.dateFilters = dateFilters
         self.mediaTextFilters = mediaTextFilters
         self.fileReferenceFilter = fileReferenceFilter
@@ -645,6 +648,7 @@ public struct SearchCandidateHint: Sendable {
             !requiredAttributes.isEmpty ||
             !excludedAttributes.isEmpty ||
             !numericFilters.isEmpty ||
+            requiresUnknownByteSize ||
             !dateFilters.isEmpty ||
             !mediaTextFilters.isEmpty ||
             fileReferenceFilter != nil ||
@@ -833,6 +837,7 @@ public enum SearchEngine {
         var requiredAttributes: FileAttributes = []
         var excludedAttributes: FileAttributes = []
         var numericFilters: [SearchCandidateNumericFilter] = []
+        var requiresUnknownByteSize = false
         var dateFilters: [SearchCandidateDateFilter] = []
         var mediaTextFilters: [SearchCandidateMediaTextFilter] = []
         var fileReferenceFilter: SearchCandidateFileReferenceFilter?
@@ -1107,6 +1112,10 @@ public enum SearchEngine {
                         extensions.formUnion(parseExtensionList(rawValue))
                     }
                 case "size", "sz":
+                    if canonicalSearchFunctionName(value.trimmingCharacters(in: .whitespacesAndNewlines)) == "unknown" {
+                        requiresUnknownByteSize = true
+                        break
+                    }
                     if let filters = sizeCandidateFilters(for: value) {
                         numericFilters.append(contentsOf: filters)
                         break
@@ -1346,6 +1355,7 @@ public enum SearchEngine {
             !requiredAttributes.isEmpty ||
             !excludedAttributes.isEmpty ||
             !numericFilters.isEmpty ||
+            requiresUnknownByteSize ||
             !dateFilters.isEmpty ||
             !mediaTextFilters.isEmpty ||
             fileReferenceFilter != nil ||
@@ -1360,6 +1370,7 @@ public enum SearchEngine {
             requiredAttributes: requiredAttributes,
             excludedAttributes: excludedAttributes,
             numericFilters: numericFilters,
+            requiresUnknownByteSize: requiresUnknownByteSize,
             dateFilters: dateFilters,
             mediaTextFilters: mediaTextFilters,
             fileReferenceFilter: fileReferenceFilter,
