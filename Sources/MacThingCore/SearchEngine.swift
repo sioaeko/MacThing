@@ -604,6 +604,7 @@ public struct SearchCandidateHint: Sendable {
     public let dateFilters: [SearchCandidateDateFilter]
     public let mediaTextFilters: [SearchCandidateMediaTextFilter]
     public let fileReferenceFilter: SearchCandidateFileReferenceFilter?
+    public let requiresFileListSource: Bool
     public let rootOnly: Bool
     public let parentPaths: Set<String>
 
@@ -618,6 +619,7 @@ public struct SearchCandidateHint: Sendable {
         dateFilters: [SearchCandidateDateFilter] = [],
         mediaTextFilters: [SearchCandidateMediaTextFilter] = [],
         fileReferenceFilter: SearchCandidateFileReferenceFilter? = nil,
+        requiresFileListSource: Bool = false,
         rootOnly: Bool = false,
         parentPaths: Set<String> = []
     ) {
@@ -631,6 +633,7 @@ public struct SearchCandidateHint: Sendable {
         self.dateFilters = dateFilters
         self.mediaTextFilters = mediaTextFilters
         self.fileReferenceFilter = fileReferenceFilter
+        self.requiresFileListSource = requiresFileListSource
         self.rootOnly = rootOnly
         self.parentPaths = parentPaths
     }
@@ -644,6 +647,7 @@ public struct SearchCandidateHint: Sendable {
             !dateFilters.isEmpty ||
             !mediaTextFilters.isEmpty ||
             fileReferenceFilter != nil ||
+            requiresFileListSource ||
             rootOnly ||
             !parentPaths.isEmpty
     }
@@ -831,6 +835,7 @@ public enum SearchEngine {
         var dateFilters: [SearchCandidateDateFilter] = []
         var mediaTextFilters: [SearchCandidateMediaTextFilter] = []
         var fileReferenceFilter: SearchCandidateFileReferenceFilter?
+        var requiresFileListSource = false
         var rootOnly = false
         var parentPaths = Set<String>()
 
@@ -1055,7 +1060,14 @@ public enum SearchEngine {
             if let colonIndex = token.firstIndex(of: ":") {
                 let function = canonicalSearchFunctionName(token[..<colonIndex])
                 let rawValue = String(token[token.index(after: colonIndex)...])
-                if rawValue.contains(";"), supportsSemicolonSearchFunctionValueList(function: function) {
+                let supportsFileListSourcePresence = [
+                    "filelistfilename",
+                    "filelistname",
+                    "filelistpath"
+                ].contains(function)
+                if rawValue.contains(";"),
+                   supportsSemicolonSearchFunctionValueList(function: function),
+                   !supportsFileListSourcePresence {
                     return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                 }
                 let value = unescapeQuotedListSeparators(rawValue)
@@ -1242,6 +1254,8 @@ public enum SearchEngine {
                     }
                 case "frn":
                     fileReferenceFilter = makeFileReferenceFilter(for: value)
+                case "filelistfilename", "filelistname", "filelistpath":
+                    requiresFileListSource = true
                 case "root":
                     guard !isExplicitFalseBoolean(value) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
@@ -1306,7 +1320,7 @@ public enum SearchEngine {
                      "ancestorsibling", "ancestorsiblingfile", "ancestorsiblingfolder",
                      "namepartdupe", "sizedupe",
                      "attribdupe", "attrdupe", "dadupe", "dcdupe",
-                     "dmdupe", "filelist", "filelistfilename", "filelistname", "filelistpath", "fsi",
+                     "dmdupe", "filelist", "fsi",
                      "width", "height", "bitdepth",
                      "dimension", "dimensions", "orientation", "aspect-ratio",
                      "aspectratio", "parents", "parentcount", "depth",
@@ -1329,6 +1343,7 @@ public enum SearchEngine {
             !dateFilters.isEmpty ||
             !mediaTextFilters.isEmpty ||
             fileReferenceFilter != nil ||
+            requiresFileListSource ||
             rootOnly ||
             !parentPaths.isEmpty
         return SearchCandidateHint(
@@ -1342,6 +1357,7 @@ public enum SearchEngine {
             dateFilters: dateFilters,
             mediaTextFilters: mediaTextFilters,
             fileReferenceFilter: fileReferenceFilter,
+            requiresFileListSource: requiresFileListSource,
             rootOnly: rootOnly,
             parentPaths: parentPaths
         )

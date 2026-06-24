@@ -161,6 +161,8 @@ private final class SQLiteDatabase {
                 attributes INTEGER NOT NULL DEFAULT 0,
                 file_id TEXT,
                 volume_id TEXT,
+                file_list_name TEXT,
+                file_list_path TEXT,
                 media_title TEXT,
                 media_artist TEXT,
                 media_album TEXT,
@@ -174,6 +176,8 @@ private final class SQLiteDatabase {
         try? execute("ALTER TABLE entries ADD COLUMN extension_name TEXT NOT NULL DEFAULT '';")
         try? execute("ALTER TABLE entries ADD COLUMN file_id TEXT;")
         try? execute("ALTER TABLE entries ADD COLUMN volume_id TEXT;")
+        try? execute("ALTER TABLE entries ADD COLUMN file_list_name TEXT;")
+        try? execute("ALTER TABLE entries ADD COLUMN file_list_path TEXT;")
         try? execute("ALTER TABLE entries ADD COLUMN media_title TEXT;")
         try? execute("ALTER TABLE entries ADD COLUMN media_artist TEXT;")
         try? execute("ALTER TABLE entries ADD COLUMN media_album TEXT;")
@@ -193,6 +197,7 @@ private final class SQLiteDatabase {
         try execute("CREATE INDEX IF NOT EXISTS entries_size_idx ON entries(byte_size);")
         try execute("CREATE INDEX IF NOT EXISTS entries_attributes_idx ON entries(attributes);")
         try execute("CREATE INDEX IF NOT EXISTS entries_identity_idx ON entries(volume_id, file_id);")
+        try execute("CREATE INDEX IF NOT EXISTS entries_file_list_source_idx ON entries(file_list_name, file_list_path);")
         try execute("CREATE INDEX IF NOT EXISTS entries_media_track_idx ON entries(media_track);")
         try execute("CREATE INDEX IF NOT EXISTS entries_media_year_idx ON entries(media_year);")
         try execute("""
@@ -331,7 +336,8 @@ private final class SQLiteDatabase {
             """
             SELECT path, name, parent, kind, byte_size, created_at, modified_at,
                    accessed_at, indexed_at, run_count, last_run_at, attributes,
-                   file_id, volume_id, media_title, media_artist, media_album,
+                   file_id, volume_id, file_list_name, file_list_path,
+                   media_title, media_artist, media_album,
                    media_comment, media_genre, media_track, media_year
             FROM entries
             ORDER BY path;
@@ -375,7 +381,8 @@ private final class SQLiteDatabase {
         let sql = """
             SELECT path, name, parent, kind, byte_size, created_at, modified_at,
                    accessed_at, indexed_at, run_count, last_run_at, attributes,
-                   file_id, volume_id, media_title, media_artist, media_album,
+                   file_id, volume_id, file_list_name, file_list_path,
+                   media_title, media_artist, media_album,
                    media_comment, media_genre, media_track, media_year
             FROM entries
             ORDER BY modified_at DESC, name ASC
@@ -458,6 +465,7 @@ private final class SQLiteDatabase {
                    entries.created_at, entries.modified_at, entries.accessed_at,
                    entries.indexed_at, entries.run_count, entries.last_run_at,
                    entries.attributes, entries.file_id, entries.volume_id,
+                   entries.file_list_name, entries.file_list_path,
                    entries.media_title, entries.media_artist, entries.media_album,
                    entries.media_comment, entries.media_genre, entries.media_track,
                    entries.media_year
@@ -485,6 +493,7 @@ private final class SQLiteDatabase {
                    entries.created_at, entries.modified_at, entries.accessed_at,
                    entries.indexed_at, entries.run_count, entries.last_run_at,
                    entries.attributes, entries.file_id, entries.volume_id,
+                   entries.file_list_name, entries.file_list_path,
                    entries.media_title, entries.media_artist, entries.media_album,
                    entries.media_comment, entries.media_genre, entries.media_track,
                    entries.media_year
@@ -531,7 +540,8 @@ private final class SQLiteDatabase {
         let sql = """
             SELECT path, name, parent, kind, byte_size, created_at, modified_at,
                    accessed_at, indexed_at, run_count, last_run_at, attributes,
-                   file_id, volume_id, media_title, media_artist, media_album,
+                   file_id, volume_id, file_list_name, file_list_path,
+                   media_title, media_artist, media_album,
                    media_comment, media_genre, media_track, media_year
             FROM entries
             WHERE \(clauses.joined(separator: " AND "))
@@ -614,6 +624,10 @@ private final class SQLiteDatabase {
             } else {
                 clauses.append("(\(prefix)file_id IS NOT NULL AND \(prefix)file_id != '')")
             }
+        }
+
+        if hint.requiresFileListSource {
+            clauses.append("(\(prefix)file_list_name IS NOT NULL AND \(prefix)file_list_path IS NOT NULL)")
         }
 
         if hint.rootOnly {
@@ -705,8 +719,9 @@ private final class SQLiteDatabase {
             INSERT OR REPLACE INTO entries (
                 path, name, parent, extension_name, kind, byte_size, created_at, modified_at,
                 accessed_at, indexed_at, run_count, last_run_at, attributes, file_id, volume_id,
-                media_title, media_artist, media_album, media_comment, media_genre, media_track, media_year
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                file_list_name, file_list_path, media_title, media_artist, media_album, media_comment,
+                media_genre, media_track, media_year
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """
         let ftsSQL = "INSERT INTO entries_fts(path, name, parent) VALUES (?, ?, ?);"
         let trigramSQL = "INSERT INTO entries_trigram(path) VALUES (?);"
@@ -732,6 +747,8 @@ private final class SQLiteDatabase {
                             .int(Int64(entry.attributes.rawValue)),
                             .optionalText(entry.fileID),
                             .optionalText(entry.volumeID),
+                            .optionalText(entry.fileListName),
+                            .optionalText(entry.fileListPath),
                             .optionalText(entry.mediaTitle),
                             .optionalText(entry.mediaArtist),
                             .optionalText(entry.mediaAlbum),
@@ -887,13 +904,15 @@ private final class SQLiteDatabase {
             attributes: attributes,
             fileID: statement.text(at: 12),
             volumeID: statement.text(at: 13),
-            mediaTitle: statement.text(at: 14),
-            mediaArtist: statement.text(at: 15),
-            mediaAlbum: statement.text(at: 16),
-            mediaComment: statement.text(at: 17),
-            mediaGenre: statement.text(at: 18),
-            mediaTrack: statement.optionalInt(at: 19),
-            mediaYear: statement.optionalInt(at: 20)
+            fileListName: statement.text(at: 14),
+            fileListPath: statement.text(at: 15),
+            mediaTitle: statement.text(at: 16),
+            mediaArtist: statement.text(at: 17),
+            mediaAlbum: statement.text(at: 18),
+            mediaComment: statement.text(at: 19),
+            mediaGenre: statement.text(at: 20),
+            mediaTrack: statement.optionalInt(at: 21),
+            mediaYear: statement.optionalInt(at: 22)
         )
     }
 

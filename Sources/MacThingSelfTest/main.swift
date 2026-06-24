@@ -3314,8 +3314,18 @@ expect(
 
 let fileListFilenameHint = SearchEngine.candidateHint(for: SearchRequest(query: "filelistfilename:Offline.efu"))
 expect(
-    fileListFilenameHint.canUseDatabaseCandidates == false,
-    "filelistfilename: searches should avoid lossy SQLite candidate prefiltering"
+    fileListFilenameHint.canUseDatabaseCandidates &&
+        fileListFilenameHint.requiresFileListSource,
+    "filelistfilename: searches should be narrowed to file-list source entries"
+)
+
+let fileListFilenameListHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "filelistfilename:Offline.efu;Archive.efu")
+)
+expect(
+    fileListFilenameListHint.canUseDatabaseCandidates &&
+        fileListFilenameListHint.requiresFileListSource,
+    "filelistfilename: value lists should preserve file-list source candidate filters"
 )
 
 let frnHint = SearchEngine.candidateHint(for: SearchRequest(query: "frn:12345"))
@@ -4922,6 +4932,27 @@ do {
         "SQLite index storage should persist media tag metadata"
     )
 
+    let sqliteFileListEntry = FileEntry(
+        path: "/Volumes/Archive/Catalog Movie.mkv",
+        name: "Catalog Movie.mkv",
+        parent: "/Volumes/Archive",
+        kind: .file,
+        byteSize: 100,
+        modifiedAt: Date(timeIntervalSince1970: 3_050)
+    ).markingFileListSource(
+        name: "Offline Media.efu",
+        path: "/Users/me/File Lists/Offline Media.efu"
+    )
+
+    try IndexStorage.upsert(entries: [sqliteFileListEntry], rootPath: temporaryDirectory.path, to: databaseURL)
+    loadedSnapshot = try IndexStorage.load(from: databaseURL)
+    let loadedFileListEntry = loadedSnapshot.entries.first { $0.path == sqliteFileListEntry.path }
+    expect(
+        loadedFileListEntry?.fileListName == sqliteFileListEntry.fileListName &&
+            loadedFileListEntry?.fileListPath == sqliteFileListEntry.fileListPath,
+        "SQLite index storage should persist file-list source metadata"
+    )
+
     if let restoredIdentityEntry {
         try IndexStorage.upsert(entries: [restoredIdentityEntry], rootPath: temporaryDirectory.path, to: databaseURL)
         loadedSnapshot = try IndexStorage.load(from: databaseURL)
@@ -5260,6 +5291,26 @@ do {
     expect(
         Set(mediaArtistPresenceCandidates.map(\.path)) == Set([mediaTaggedEntry.path, otherMediaTaggedEntry.path]),
         "SQLite candidate search should apply media text presence filters"
+    )
+
+    let fileListSourceCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "filelistfilename:Offline")),
+        limit: 20,
+        from: databaseURL
+    )
+    expect(
+        fileListSourceCandidates.map(\.path) == [sqliteFileListEntry.path],
+        "SQLite candidate search should apply file-list source provenance filters"
+    )
+
+    let fileListSourcePresenceCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "filelistfilename:")),
+        limit: 20,
+        from: databaseURL
+    )
+    expect(
+        fileListSourcePresenceCandidates.map(\.path) == [sqliteFileListEntry.path],
+        "SQLite candidate search should apply file-list source presence filters"
     )
 
     let offlineOnly = FileEntry(

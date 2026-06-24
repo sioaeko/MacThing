@@ -89,8 +89,9 @@ The current packaged release is available from GitHub:
 - SQLite candidate seeding also applies supported structured filters such as
   extension, kind/category, file size, dates, file attributes, media track/year
   metadata, filesystem identity (`frn:`) filters, root-entry (`root:`) filters,
-  exact direct-parent filters, safe parent/ancestor path text filters, and
-  diacritic-sensitive media text filters.
+  file-list provenance (`filelistfilename:`) filters, exact direct-parent
+  filters, safe parent/ancestor path text filters, and diacritic-sensitive
+  media text filters.
 - File-name, path, wildcard, regex, and compact fuzzy matching. Wildcard and
   regex searches honor the same case/diacritic matching options as text search.
 - Match path, fuzzy, regex, case-sensitive, whole-word, and diacritic-sensitive
@@ -260,7 +261,8 @@ The current packaged release is available from GitHub:
   EFU-like file-list output.
 - EFU-like file lists are stored as separate sources for offline/NAS/media
   catalog search, and can be enabled, disabled, refreshed, or removed without
-  rewriting the local disk index.
+  rewriting the local disk index. SQLite-backed indexes preserve file-list
+  source metadata for source-scoped searches.
 - `content:<text>` explicitly searches small UTF-8, UTF-16, and Windows-1252
   text files as a slower secondary path; encoding-specific forms include
   `utf8content:`, `utf16content:`, `utf16becontent:`, and `ansicontent:`.
