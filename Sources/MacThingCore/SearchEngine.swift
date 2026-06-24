@@ -531,6 +531,7 @@ public enum SearchCandidateNumericField: String, Sendable {
     case runCount
     case mediaTrack
     case mediaYear
+    case depth
 }
 
 public enum SearchCandidateDateField: String, Sendable {
@@ -1144,6 +1145,11 @@ public enum SearchEngine {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
                     numericFilters.append(contentsOf: filter.candidateFilters(field: .runCount))
+                case "depth", "parents", "parentcount":
+                    guard let filter = ComparisonFilter<Int64>.parse(value, valueParser: { Int64($0) }) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .depth))
                 case "track":
                     guard let filter = ComparisonFilter<Int64>.parse(value.isEmpty ? ">0" : value, valueParser: { Int64($0) }) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
@@ -1323,7 +1329,7 @@ public enum SearchEngine {
                      "dmdupe", "filelist", "fsi",
                      "width", "height", "bitdepth",
                      "dimension", "dimensions", "orientation", "aspect-ratio",
-                     "aspectratio", "parents", "parentcount", "depth",
+                     "aspectratio",
                      "shell":
                     return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                 default:

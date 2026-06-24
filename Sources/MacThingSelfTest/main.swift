@@ -3051,8 +3051,12 @@ expect(
 
 let parentCountHint = SearchEngine.candidateHint(for: SearchRequest(query: "parent-count:>3"))
 expect(
-    parentCountHint.canUseDatabaseCandidates == false,
-    "parent-count: searches should avoid lossy SQLite candidate prefiltering"
+    parentCountHint.canUseDatabaseCandidates &&
+        parentCountHint.numericFilters.count == 1 &&
+        parentCountHint.numericFilters[0].field == .depth &&
+        parentCountHint.numericFilters[0].op == .greaterThan &&
+        parentCountHint.numericFilters[0].value == 3,
+    "parent-count filters should be pushed into SQLite depth candidate hints"
 )
 
 let dashedStartWithHint = SearchEngine.candidateHint(for: SearchRequest(query: "start-with:Launch"))
@@ -3408,6 +3412,26 @@ expect(
         mediaYearHint.numericFilters[0].op == .greaterThanOrEqual &&
         mediaYearHint.numericFilters[0].value == 2020,
     "media year filters should be pushed into SQLite candidate hints"
+)
+
+let depthHint = SearchEngine.candidateHint(for: SearchRequest(query: "depth:>=4"))
+expect(
+    depthHint.canUseDatabaseCandidates &&
+        depthHint.numericFilters.count == 1 &&
+        depthHint.numericFilters[0].field == .depth &&
+        depthHint.numericFilters[0].op == .greaterThanOrEqual &&
+        depthHint.numericFilters[0].value == 4,
+    "depth filters should be pushed into SQLite candidate hints"
+)
+
+let exactParentCountHint = SearchEngine.candidateHint(for: SearchRequest(query: "parent-count:4"))
+expect(
+    exactParentCountHint.canUseDatabaseCandidates &&
+        exactParentCountHint.numericFilters.count == 1 &&
+        exactParentCountHint.numericFilters[0].field == .depth &&
+        exactParentCountHint.numericFilters[0].op == .equal &&
+        exactParentCountHint.numericFilters[0].value == 4,
+    "parent-count filters should alias depth SQLite candidate hints"
 )
 
 let fileExistsHint = SearchEngine.candidateHint(for: SearchRequest(query: "file-exists:$stem:.jpg"))
@@ -5146,6 +5170,31 @@ do {
     expect(
         rootCandidates.map(\.path) == [rootLevelEntry.path],
         "SQLite candidate search should apply root-entry filters"
+    )
+
+    let depthCandidateDatabaseURL = temporaryDirectory.appending(path: "DepthCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: "/", entries: [rootLevelEntry, document, childInFolder, nestedGrandchild]),
+        to: depthCandidateDatabaseURL
+    )
+    let depthCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "depth:4")),
+        limit: 20,
+        from: depthCandidateDatabaseURL
+    )
+    expect(
+        depthCandidates.map(\.path) == [childInFolder.path],
+        "SQLite candidate search should apply depth filters"
+    )
+
+    let parentCountCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "parent-count:>=4")),
+        limit: 20,
+        from: depthCandidateDatabaseURL
+    )
+    expect(
+        Set(parentCountCandidates.map(\.path)) == Set([childInFolder.path, nestedGrandchild.path]),
+        "SQLite candidate search should apply parent-count depth aliases"
     )
 
     let broadPathFTSDecoys = (0..<25).map { index in

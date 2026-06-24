@@ -594,7 +594,7 @@ private final class SQLiteDatabase {
         }
 
         for filter in hint.numericFilters {
-            clauses.append("\(prefix)\(column(for: filter.field)) \(sqlOperator(for: filter.op)) ?")
+            clauses.append("\(numericExpression(for: filter.field, prefix: prefix)) \(sqlOperator(for: filter.op)) ?")
             bindings.append(.int(filter.value))
         }
 
@@ -641,16 +641,25 @@ private final class SQLiteDatabase {
         Array(repeating: "?", count: count).joined(separator: ", ")
     }
 
-    private func column(for field: SearchCandidateNumericField) -> String {
+    private func numericExpression(for field: SearchCandidateNumericField, prefix: String) -> String {
         switch field {
         case .byteSize:
-            return "byte_size"
+            return "\(prefix)byte_size"
         case .runCount:
-            return "run_count"
+            return "\(prefix)run_count"
         case .mediaTrack:
-            return "media_track"
+            return "\(prefix)media_track"
         case .mediaYear:
-            return "media_year"
+            return "\(prefix)media_year"
+        case .depth:
+            return """
+                (CASE
+                    WHEN \(prefix)parent = '' OR \(prefix)parent = '/' THEN 0
+                    WHEN substr(\(prefix)parent, 1, 1) = '/' THEN length(\(prefix)parent) - length(replace(\(prefix)parent, '/', ''))
+                    ELSE length(\(prefix)parent) - length(replace(\(prefix)parent, '/', ''))
+                        + CASE WHEN length(\(prefix)parent) > 0 THEN 1 ELSE 0 END
+                END)
+                """
         }
     }
 
