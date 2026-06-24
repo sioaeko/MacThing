@@ -3420,8 +3420,15 @@ expect(
 
 let rootHint = SearchEngine.candidateHint(for: SearchRequest(query: "root:"))
 expect(
-    rootHint.canUseDatabaseCandidates == false,
-    "root: searches should avoid lossy SQLite candidate prefiltering"
+    rootHint.canUseDatabaseCandidates &&
+        rootHint.rootOnly,
+    "root: searches should be pushed into SQLite candidate hints"
+)
+
+let rootFalseHint = SearchEngine.candidateHint(for: SearchRequest(query: "root:0"))
+expect(
+    rootFalseHint.canUseDatabaseCandidates == false,
+    "root:0 searches should avoid unnecessary SQLite candidate prefiltering"
 )
 
 let shellHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch shell:desktop"))
@@ -5093,6 +5100,21 @@ do {
     expect(
         Set(identityPresenceCandidates.map(\.path)) == Set([identitySearchEntry.path, otherIdentitySearchEntry.path]),
         "SQLite candidate search should apply file identity presence filters"
+    )
+
+    let rootCandidateDatabaseURL = temporaryDirectory.appending(path: "RootCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: "/", entries: [rootLevelEntry, nameMatch]),
+        to: rootCandidateDatabaseURL
+    )
+    let rootCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "root:")),
+        limit: 20,
+        from: rootCandidateDatabaseURL
+    )
+    expect(
+        rootCandidates.map(\.path) == [rootLevelEntry.path],
+        "SQLite candidate search should apply root-entry filters"
     )
 
     let broadPathFTSDecoys = (0..<25).map { index in

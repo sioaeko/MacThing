@@ -88,9 +88,9 @@ The current packaged release is available from GitHub:
   fills the first candidate window, preserving exact path fragments.
 - SQLite candidate seeding also applies supported structured filters such as
   extension, kind/category, file size, dates, file attributes, media track/year
-  metadata, filesystem identity (`frn:`) filters, exact direct-parent filters,
-  safe parent/ancestor path text filters, and diacritic-sensitive media text
-  filters.
+  metadata, filesystem identity (`frn:`) filters, root-entry (`root:`) filters,
+  exact direct-parent filters, safe parent/ancestor path text filters, and
+  diacritic-sensitive media text filters.
 - File-name, path, wildcard, regex, and compact fuzzy matching. Wildcard and
   regex searches honor the same case/diacritic matching options as text search.
 - Match path, fuzzy, regex, case-sensitive, whole-word, and diacritic-sensitive

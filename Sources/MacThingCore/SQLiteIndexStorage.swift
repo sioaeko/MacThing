@@ -616,6 +616,10 @@ private final class SQLiteDatabase {
             }
         }
 
+        if hint.rootOnly {
+            clauses.append("(\(prefix)parent = '' OR \(prefix)parent = '/' OR \(prefix)path = '/')")
+        }
+
         return SQLiteCandidateFilter(clauses: clauses, bindings: bindings)
     }
 

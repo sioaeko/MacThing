@@ -604,6 +604,7 @@ public struct SearchCandidateHint: Sendable {
     public let dateFilters: [SearchCandidateDateFilter]
     public let mediaTextFilters: [SearchCandidateMediaTextFilter]
     public let fileReferenceFilter: SearchCandidateFileReferenceFilter?
+    public let rootOnly: Bool
     public let parentPaths: Set<String>
 
     public init(
@@ -617,6 +618,7 @@ public struct SearchCandidateHint: Sendable {
         dateFilters: [SearchCandidateDateFilter] = [],
         mediaTextFilters: [SearchCandidateMediaTextFilter] = [],
         fileReferenceFilter: SearchCandidateFileReferenceFilter? = nil,
+        rootOnly: Bool = false,
         parentPaths: Set<String> = []
     ) {
         self.terms = terms
@@ -629,6 +631,7 @@ public struct SearchCandidateHint: Sendable {
         self.dateFilters = dateFilters
         self.mediaTextFilters = mediaTextFilters
         self.fileReferenceFilter = fileReferenceFilter
+        self.rootOnly = rootOnly
         self.parentPaths = parentPaths
     }
 
@@ -641,6 +644,7 @@ public struct SearchCandidateHint: Sendable {
             !dateFilters.isEmpty ||
             !mediaTextFilters.isEmpty ||
             fileReferenceFilter != nil ||
+            rootOnly ||
             !parentPaths.isEmpty
     }
 
@@ -827,6 +831,7 @@ public enum SearchEngine {
         var dateFilters: [SearchCandidateDateFilter] = []
         var mediaTextFilters: [SearchCandidateMediaTextFilter] = []
         var fileReferenceFilter: SearchCandidateFileReferenceFilter?
+        var rootOnly = false
         var parentPaths = Set<String>()
 
         func addTerm(_ value: String) {
@@ -972,6 +977,15 @@ public enum SearchEngine {
             let volumeID = String(normalizedValue[..<colonIndex])
             let fileID = String(normalizedValue[normalizedValue.index(after: colonIndex)...])
             return SearchCandidateFileReferenceFilter(fileID: fileID, volumeID: volumeID)
+        }
+
+        func isExplicitFalseBoolean(_ value: String) -> Bool {
+            switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            case "0", "false", "no", "off":
+                return true
+            default:
+                return false
+            }
         }
 
         for rawToken in tokens {
@@ -1228,6 +1242,11 @@ public enum SearchEngine {
                     }
                 case "frn":
                     fileReferenceFilter = makeFileReferenceFilter(for: value)
+                case "root":
+                    guard !isExplicitFalseBoolean(value) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    rootOnly = true
                 case "content", "ansicontent", "utf8content", "utf16content", "utf16becontent",
                      "regex", "dupe", "dupename", "empty", "nothing",
                      "exists", "fileexists", "folderexists",
@@ -1288,7 +1307,7 @@ public enum SearchEngine {
                      "namepartdupe", "sizedupe",
                      "attribdupe", "attrdupe", "dadupe", "dcdupe",
                      "dmdupe", "filelist", "filelistfilename", "filelistname", "filelistpath", "fsi",
-                     "root", "width", "height", "bitdepth",
+                     "width", "height", "bitdepth",
                      "dimension", "dimensions", "orientation", "aspect-ratio",
                      "aspectratio", "parents", "parentcount", "depth",
                      "shell":
@@ -1310,6 +1329,7 @@ public enum SearchEngine {
             !dateFilters.isEmpty ||
             !mediaTextFilters.isEmpty ||
             fileReferenceFilter != nil ||
+            rootOnly ||
             !parentPaths.isEmpty
         return SearchCandidateHint(
             terms: uniqueTerms,
@@ -1322,6 +1342,7 @@ public enum SearchEngine {
             dateFilters: dateFilters,
             mediaTextFilters: mediaTextFilters,
             fileReferenceFilter: fileReferenceFilter,
+            rootOnly: rootOnly,
             parentPaths: parentPaths
         )
     }
