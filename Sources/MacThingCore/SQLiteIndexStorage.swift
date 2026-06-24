@@ -593,6 +593,16 @@ private final class SQLiteDatabase {
             bindings.append(.date(filter.value))
         }
 
+        for filter in hint.mediaTextFilters {
+            let column = "\(prefix)\(column(for: filter.field))"
+            if filter.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                clauses.append("(\(column) IS NOT NULL AND \(column) != '')")
+            } else {
+                clauses.append("\(column) LIKE ? ESCAPE '\\'")
+                bindings.append(.text("%\(escapeLike(filter.value))%"))
+            }
+        }
+
         return SQLiteCandidateFilter(clauses: clauses, bindings: bindings)
     }
 
@@ -606,6 +616,25 @@ private final class SQLiteDatabase {
             return "byte_size"
         case .runCount:
             return "run_count"
+        case .mediaTrack:
+            return "media_track"
+        case .mediaYear:
+            return "media_year"
+        }
+    }
+
+    private func column(for field: SearchCandidateMediaTextField) -> String {
+        switch field {
+        case .mediaTitle:
+            return "media_title"
+        case .mediaArtist:
+            return "media_artist"
+        case .mediaAlbum:
+            return "media_album"
+        case .mediaComment:
+            return "media_comment"
+        case .mediaGenre:
+            return "media_genre"
         }
     }
 

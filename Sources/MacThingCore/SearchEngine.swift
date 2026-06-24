@@ -529,6 +529,8 @@ public enum SearchCandidateComparisonOperator: String, Sendable {
 public enum SearchCandidateNumericField: String, Sendable {
     case byteSize
     case runCount
+    case mediaTrack
+    case mediaYear
 }
 
 public enum SearchCandidateDateField: String, Sendable {
@@ -563,6 +565,24 @@ public struct SearchCandidateDateFilter: Sendable {
     }
 }
 
+public enum SearchCandidateMediaTextField: String, Sendable {
+    case mediaTitle
+    case mediaArtist
+    case mediaAlbum
+    case mediaComment
+    case mediaGenre
+}
+
+public struct SearchCandidateMediaTextFilter: Sendable {
+    public let field: SearchCandidateMediaTextField
+    public let value: String
+
+    public init(field: SearchCandidateMediaTextField, value: String) {
+        self.field = field
+        self.value = value
+    }
+}
+
 public struct SearchCandidateHint: Sendable {
     public let terms: [String]
     public let canUseDatabaseCandidates: Bool
@@ -572,6 +592,7 @@ public struct SearchCandidateHint: Sendable {
     public let excludedAttributes: FileAttributes
     public let numericFilters: [SearchCandidateNumericFilter]
     public let dateFilters: [SearchCandidateDateFilter]
+    public let mediaTextFilters: [SearchCandidateMediaTextFilter]
     public let parentPaths: Set<String>
 
     public init(
@@ -583,6 +604,7 @@ public struct SearchCandidateHint: Sendable {
         excludedAttributes: FileAttributes = [],
         numericFilters: [SearchCandidateNumericFilter] = [],
         dateFilters: [SearchCandidateDateFilter] = [],
+        mediaTextFilters: [SearchCandidateMediaTextFilter] = [],
         parentPaths: Set<String> = []
     ) {
         self.terms = terms
@@ -593,6 +615,7 @@ public struct SearchCandidateHint: Sendable {
         self.excludedAttributes = excludedAttributes
         self.numericFilters = numericFilters
         self.dateFilters = dateFilters
+        self.mediaTextFilters = mediaTextFilters
         self.parentPaths = parentPaths
     }
 
@@ -603,6 +626,7 @@ public struct SearchCandidateHint: Sendable {
             !excludedAttributes.isEmpty ||
             !numericFilters.isEmpty ||
             !dateFilters.isEmpty ||
+            !mediaTextFilters.isEmpty ||
             !parentPaths.isEmpty
     }
 
@@ -787,6 +811,7 @@ public enum SearchEngine {
         var excludedAttributes: FileAttributes = []
         var numericFilters: [SearchCandidateNumericFilter] = []
         var dateFilters: [SearchCandidateDateFilter] = []
+        var mediaTextFilters: [SearchCandidateMediaTextFilter] = []
         var parentPaths = Set<String>()
 
         func addTerm(_ value: String) {
@@ -892,6 +917,23 @@ public enum SearchEngine {
                 }
                 addTerm(value)
                 return true
+            default:
+                return nil
+            }
+        }
+
+        func mediaTextField(for function: String) -> SearchCandidateMediaTextField? {
+            switch function {
+            case "title":
+                return .mediaTitle
+            case "artist":
+                return .mediaArtist
+            case "album":
+                return .mediaAlbum
+            case "comment":
+                return .mediaComment
+            case "genre":
+                return .mediaGenre
             default:
                 return nil
             }
@@ -1041,6 +1083,16 @@ public enum SearchEngine {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
                     numericFilters.append(contentsOf: filter.candidateFilters(field: .runCount))
+                case "track":
+                    guard let filter = ComparisonFilter<Int64>.parse(value.isEmpty ? ">0" : value, valueParser: { Int64($0) }) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .mediaTrack))
+                case "year":
+                    guard let filter = ComparisonFilter<Int64>.parse(value.isEmpty ? ">0" : value, valueParser: { Int64($0) }) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .mediaYear))
                 case "startwith", "startswith", "beginwith", "beginswith", "begin":
                     if !value.isEmpty {
                         terms.append(value)
@@ -1132,6 +1184,13 @@ public enum SearchEngine {
                         required: &requiredAttributes,
                         excluded: &excludedAttributes
                     )
+                case "title", "artist", "album", "comment", "genre":
+                    guard let field = mediaTextField(for: function) else {
+                        continue
+                    }
+                    if value.isEmpty || request.options.diacriticSensitive {
+                        mediaTextFilters.append(SearchCandidateMediaTextFilter(field: field, value: value))
+                    }
                 case "content", "ansicontent", "utf8content", "utf16content", "utf16becontent",
                      "regex", "dupe", "dupename", "empty", "nothing",
                      "exists", "fileexists", "folderexists",
@@ -1192,7 +1251,6 @@ public enum SearchEngine {
                      "namepartdupe", "sizedupe",
                      "attribdupe", "attrdupe", "dadupe", "dcdupe",
                      "dmdupe", "filelist", "filelistfilename", "filelistname", "filelistpath", "frn", "fsi",
-                     "album", "artist", "comment", "genre", "title", "track", "year",
                      "root", "width", "height", "bitdepth",
                      "dimension", "dimensions", "orientation", "aspect-ratio",
                      "aspectratio", "parents", "parentcount", "depth",
@@ -1213,6 +1271,7 @@ public enum SearchEngine {
             !excludedAttributes.isEmpty ||
             !numericFilters.isEmpty ||
             !dateFilters.isEmpty ||
+            !mediaTextFilters.isEmpty ||
             !parentPaths.isEmpty
         return SearchCandidateHint(
             terms: uniqueTerms,
@@ -1223,6 +1282,7 @@ public enum SearchEngine {
             excludedAttributes: excludedAttributes,
             numericFilters: numericFilters,
             dateFilters: dateFilters,
+            mediaTextFilters: mediaTextFilters,
             parentPaths: parentPaths
         )
     }

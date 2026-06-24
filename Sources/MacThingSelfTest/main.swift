@@ -3333,13 +3333,47 @@ expect(
 let mediaTagHint = SearchEngine.candidateHint(for: SearchRequest(query: "artist:Codex"))
 expect(
     mediaTagHint.canUseDatabaseCandidates == false,
-    "media tag searches should avoid lossy SQLite candidate prefiltering"
+    "diacritic-insensitive media tag text searches should avoid lossy SQLite text prefiltering"
+)
+
+let mediaTagSensitiveHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "artist:Codex", options: SearchOptions(diacriticSensitive: true))
+)
+expect(
+    mediaTagSensitiveHint.canUseDatabaseCandidates &&
+        mediaTagSensitiveHint.mediaTextFilters.count == 1 &&
+        mediaTagSensitiveHint.mediaTextFilters[0].field == .mediaArtist &&
+        mediaTagSensitiveHint.mediaTextFilters[0].value == "Codex",
+    "diacritic-sensitive media tag searches should be pushed into SQLite candidate hints"
+)
+
+let mediaTagPresenceHint = SearchEngine.candidateHint(for: SearchRequest(query: "artist:"))
+expect(
+    mediaTagPresenceHint.canUseDatabaseCandidates &&
+        mediaTagPresenceHint.mediaTextFilters.count == 1 &&
+        mediaTagPresenceHint.mediaTextFilters[0].field == .mediaArtist &&
+        mediaTagPresenceHint.mediaTextFilters[0].value.isEmpty,
+    "empty media tag searches should be pushed into SQLite presence filters"
+)
+
+let mediaTrackHint = SearchEngine.candidateHint(for: SearchRequest(query: "track:>5"))
+expect(
+    mediaTrackHint.canUseDatabaseCandidates &&
+        mediaTrackHint.numericFilters.count == 1 &&
+        mediaTrackHint.numericFilters[0].field == .mediaTrack &&
+        mediaTrackHint.numericFilters[0].op == .greaterThan &&
+        mediaTrackHint.numericFilters[0].value == 5,
+    "media track filters should be pushed into SQLite candidate hints"
 )
 
 let mediaYearHint = SearchEngine.candidateHint(for: SearchRequest(query: "year:>=2020"))
 expect(
-    mediaYearHint.canUseDatabaseCandidates == false,
-    "media year searches should avoid lossy SQLite candidate prefiltering"
+    mediaYearHint.canUseDatabaseCandidates &&
+        mediaYearHint.numericFilters.count == 1 &&
+        mediaYearHint.numericFilters[0].field == .mediaYear &&
+        mediaYearHint.numericFilters[0].op == .greaterThanOrEqual &&
+        mediaYearHint.numericFilters[0].value == 2020,
+    "media year filters should be pushed into SQLite candidate hints"
 )
 
 let fileExistsHint = SearchEngine.candidateHint(for: SearchRequest(query: "file-exists:$stem:.jpg"))
@@ -5102,6 +5136,49 @@ do {
     expect(
         todayLaunchCandidates.map(\.path) == [photo.path],
         "SQLite candidate search should apply date filters"
+    )
+
+    try IndexStorage.upsert(entries: [otherMediaTaggedEntry], rootPath: temporaryDirectory.path, to: databaseURL)
+    let mediaTrackCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "track:>5")),
+        limit: 20,
+        from: databaseURL
+    )
+    expect(
+        mediaTrackCandidates.map(\.path) == [mediaTaggedEntry.path],
+        "SQLite candidate search should apply media track filters"
+    )
+
+    let mediaYearCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "year:>=2020")),
+        limit: 20,
+        from: databaseURL
+    )
+    expect(
+        mediaYearCandidates.map(\.path) == [mediaTaggedEntry.path],
+        "SQLite candidate search should apply media year filters"
+    )
+
+    let mediaArtistCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "artist:Codex", options: SearchOptions(diacriticSensitive: true))
+        ),
+        limit: 20,
+        from: databaseURL
+    )
+    expect(
+        mediaArtistCandidates.map(\.path) == [mediaTaggedEntry.path],
+        "SQLite candidate search should apply diacritic-sensitive media text filters"
+    )
+
+    let mediaArtistPresenceCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "artist:")),
+        limit: 20,
+        from: databaseURL
+    )
+    expect(
+        Set(mediaArtistPresenceCandidates.map(\.path)) == Set([mediaTaggedEntry.path, otherMediaTaggedEntry.path]),
+        "SQLite candidate search should apply media text presence filters"
     )
 
     let offlineOnly = FileEntry(
