@@ -3003,26 +3003,42 @@ expect(
 
 let stemLengthHint = SearchEngine.candidateHint(for: SearchRequest(query: "stem-len:>5"))
 expect(
-    stemLengthHint.canUseDatabaseCandidates == false,
-    "stem-len: searches should avoid lossy SQLite candidate prefiltering"
+    stemLengthHint.canUseDatabaseCandidates &&
+        stemLengthHint.numericFilters.count == 1 &&
+        stemLengthHint.numericFilters[0].field == .namePartLength &&
+        stemLengthHint.numericFilters[0].op == .greaterThan &&
+        stemLengthHint.numericFilters[0].value == 5,
+    "stem-len: searches should be pushed into SQLite length candidate hints"
 )
 
 let charsHint = SearchEngine.candidateHint(for: SearchRequest(query: "chars:>5"))
 expect(
-    charsHint.canUseDatabaseCandidates == false,
-    "chars: searches should avoid lossy SQLite candidate prefiltering"
+    charsHint.canUseDatabaseCandidates &&
+        charsHint.numericFilters.count == 1 &&
+        charsHint.numericFilters[0].field == .characterCount &&
+        charsHint.numericFilters[0].op == .greaterThan &&
+        charsHint.numericFilters[0].value == 5,
+    "chars: searches should be pushed into SQLite character-count candidate hints"
 )
 
 let filenameLengthHint = SearchEngine.candidateHint(for: SearchRequest(query: "filename-len:>5"))
 expect(
-    filenameLengthHint.canUseDatabaseCandidates == false,
-    "filename-len: searches should avoid lossy SQLite candidate prefiltering"
+    filenameLengthHint.canUseDatabaseCandidates &&
+        filenameLengthHint.numericFilters.count == 1 &&
+        filenameLengthHint.numericFilters[0].field == .pathLength &&
+        filenameLengthHint.numericFilters[0].op == .greaterThan &&
+        filenameLengthHint.numericFilters[0].value == 5,
+    "filename-len: searches should be pushed into SQLite path-length candidate hints"
 )
 
 let utf8LengthHint = SearchEngine.candidateHint(for: SearchRequest(query: "utf8-len:>8"))
 expect(
-    utf8LengthHint.canUseDatabaseCandidates == false,
-    "utf8-len: searches should avoid lossy SQLite candidate prefiltering"
+    utf8LengthHint.canUseDatabaseCandidates &&
+        utf8LengthHint.numericFilters.count == 1 &&
+        utf8LengthHint.numericFilters[0].field == .nameUTF8Length &&
+        utf8LengthHint.numericFilters[0].op == .greaterThan &&
+        utf8LengthHint.numericFilters[0].value == 8,
+    "utf8-len: searches should be pushed into SQLite UTF-8 length candidate hints"
 )
 
 let pathPartHint = SearchEngine.candidateHint(for: SearchRequest(query: "path-part:Documents"))
@@ -3054,20 +3070,32 @@ expect(
 
 let pathLengthHint = SearchEngine.candidateHint(for: SearchRequest(query: "path-len:>20"))
 expect(
-    pathLengthHint.canUseDatabaseCandidates == false,
-    "path-len: searches should avoid lossy SQLite candidate prefiltering"
+    pathLengthHint.canUseDatabaseCandidates &&
+        pathLengthHint.numericFilters.count == 1 &&
+        pathLengthHint.numericFilters[0].field == .pathLength &&
+        pathLengthHint.numericFilters[0].op == .greaterThan &&
+        pathLengthHint.numericFilters[0].value == 20,
+    "path-len: searches should be pushed into SQLite path-length candidate hints"
 )
 
 let pathPartLengthHint = SearchEngine.candidateHint(for: SearchRequest(query: "path-part-len:>20"))
 expect(
-    pathPartLengthHint.canUseDatabaseCandidates == false,
-    "path-part-len: searches should avoid lossy SQLite candidate prefiltering"
+    pathPartLengthHint.canUseDatabaseCandidates &&
+        pathPartLengthHint.numericFilters.count == 1 &&
+        pathPartLengthHint.numericFilters[0].field == .pathPartLength &&
+        pathPartLengthHint.numericFilters[0].op == .greaterThan &&
+        pathPartLengthHint.numericFilters[0].value == 20,
+    "path-part-len: searches should be pushed into SQLite parent-length candidate hints"
 )
 
 let extensionLengthHint = SearchEngine.candidateHint(for: SearchRequest(query: "ext-len:3"))
 expect(
-    extensionLengthHint.canUseDatabaseCandidates == false,
-    "ext-len: searches should avoid lossy SQLite candidate prefiltering"
+    extensionLengthHint.canUseDatabaseCandidates &&
+        extensionLengthHint.numericFilters.count == 1 &&
+        extensionLengthHint.numericFilters[0].field == .extensionLength &&
+        extensionLengthHint.numericFilters[0].op == .equal &&
+        extensionLengthHint.numericFilters[0].value == 3,
+    "ext-len: searches should be pushed into SQLite extension-length candidate hints"
 )
 
 let parentCountHint = SearchEngine.candidateHint(for: SearchRequest(query: "parent-count:>3"))
@@ -5216,6 +5244,61 @@ do {
     expect(
         Set(parentCountCandidates.map(\.path)) == Set([childInFolder.path, nestedGrandchild.path]),
         "SQLite candidate search should apply parent-count depth aliases"
+    )
+
+    let lengthCandidateDatabaseURL = temporaryDirectory.appending(path: "LengthCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: "/Users/me", entries: [emojiNameEntry, utf8NameEntry, photo, document, folder]),
+        to: lengthCandidateDatabaseURL
+    )
+    let characterCountCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "chars:\(emojiNameEntry.name.count)")),
+        limit: 20,
+        from: lengthCandidateDatabaseURL
+    )
+    expect(
+        characterCountCandidates.map(\.path) == [emojiNameEntry.path],
+        "SQLite candidate search should apply Swift character-count filters"
+    )
+
+    let nameLengthCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "len:\(emojiNameEntry.name.utf16.count)")),
+        limit: 20,
+        from: lengthCandidateDatabaseURL
+    )
+    expect(
+        Set(nameLengthCandidates.map(\.path)) == Set([emojiNameEntry.path, folder.path]),
+        "SQLite candidate search should apply UTF-16 name-length filters"
+    )
+
+    let nameUTF8LengthCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "utf8-len:\(utf8NameEntry.name.utf8.count)")),
+        limit: 20,
+        from: lengthCandidateDatabaseURL
+    )
+    expect(
+        nameUTF8LengthCandidates.map(\.path) == [utf8NameEntry.path],
+        "SQLite candidate search should apply UTF-8 name-length filters"
+    )
+
+    let pathLengthCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "path-len:\(photo.path.utf16.count)")),
+        limit: 20,
+        from: lengthCandidateDatabaseURL
+    )
+    expect(
+        pathLengthCandidates.map(\.path) == [photo.path],
+        "SQLite candidate search should apply UTF-16 path-length filters"
+    )
+
+    let extensionLengthCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "ext-len:3")),
+        limit: 20,
+        from: lengthCandidateDatabaseURL
+    )
+    expect(
+        Set(extensionLengthCandidates.map(\.path)) == Set([photo.path, utf8NameEntry.path, emojiNameEntry.path]),
+        "SQLite candidate search should apply extension-length filters"
     )
 
     let broadPathFTSDecoys = (0..<25).map { index in

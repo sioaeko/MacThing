@@ -532,6 +532,14 @@ public enum SearchCandidateNumericField: String, Sendable {
     case mediaTrack
     case mediaYear
     case depth
+    case characterCount
+    case nameLength
+    case namePartLength
+    case nameUTF8Length
+    case pathLength
+    case pathUTF8Length
+    case pathPartLength
+    case extensionLength
 }
 
 public enum SearchCandidateDateField: String, Hashable, Sendable {
@@ -1171,6 +1179,51 @@ public enum SearchEngine {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
                     numericFilters.append(contentsOf: filter.candidateFilters(field: .depth))
+                case "chars":
+                    guard let filter = ComparisonFilter<Int64>.parse(value, valueParser: { Int64($0) }) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .characterCount))
+                case "len", "length", "namelen", "namelength",
+                     "basenamelen", "basenamelength":
+                    guard let filter = ComparisonFilter<Int64>.parse(value, valueParser: { Int64($0) }) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .nameLength))
+                case "stemlen", "stemlength", "namepartlen", "namepartlength":
+                    guard let filter = ComparisonFilter<Int64>.parse(value, valueParser: { Int64($0) }) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .namePartLength))
+                case "utf8len", "basenameutf8bytelength", "nameleninutf8bytes",
+                     "namelengthinutf8bytes", "nameutf8bytelength",
+                     "filenameleninutf8bytes", "filenamelengthinutf8bytes":
+                    guard let filter = ComparisonFilter<Int64>.parse(value, valueParser: { Int64($0) }) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .nameUTF8Length))
+                case "fullpathutf8bytelength", "fullpathlengthinutf8bytes":
+                    guard let filter = ComparisonFilter<Int64>.parse(value, valueParser: { Int64($0) }) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .pathUTF8Length))
+                case "filenamelen", "filenamelength", "fullpathlen", "fullpathlength",
+                     "pathandnamelen", "pathandnamelength", "pathnamelen", "pathnamelength",
+                     "pathlen", "pathlength":
+                    guard let filter = ComparisonFilter<Int64>.parse(value, valueParser: { Int64($0) }) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .pathLength))
+                case "pathpartlen", "pathpartlength", "locationlen", "locationlength":
+                    guard let filter = ComparisonFilter<Int64>.parse(value, valueParser: { Int64($0) }) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .pathPartLength))
+                case "extlen", "extlength", "extensionlen", "extensionlength":
+                    guard let filter = ComparisonFilter<Int64>.parse(value, valueParser: { Int64($0) }) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .extensionLength))
                 case "track":
                     guard let filter = ComparisonFilter<Int64>.parse(value.isEmpty ? ">0" : value, valueParser: { Int64($0) }) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
@@ -1314,18 +1367,7 @@ public enum SearchEngine {
                      "childfilesize", "childfoldersize", "childfilelist",
                      "sibling", "siblingname", "siblingfile",
                      "siblingfiles", "siblingfolder", "siblingfolders",
-                     "siblingdir", "siblingdirs", "chars", "stemlen", "stemlength",
-                     "namefrequency", "namepartlen", "namepartlength", "basenamelen",
-                     "basenamelength", "filenamelen", "filenamelength",
-                     "fullpathlen", "fullpathlength", "pathandnamelen",
-                     "pathandnamelength", "pathnamelen", "pathnamelength", "utf8len",
-                     "basenameutf8bytelength", "nameleninutf8bytes",
-                     "namelengthinutf8bytes", "nameutf8bytelength",
-                     "filenameleninutf8bytes", "filenamelengthinutf8bytes",
-                     "fullpathutf8bytelength", "fullpathlengthinutf8bytes",
-                     "pathlen", "pathlength",
-                     "pathpartlen", "pathpartlength", "locationlen",
-                     "locationlength", "extlen", "extlength", "extensionlen", "extensionlength",
+                     "siblingdir", "siblingdirs", "namefrequency",
                      "extensionfrequency", "pathdupe",
                      "totalchildsize", "siblingcount",
                      "siblingfilecount", "siblingfoldercount",

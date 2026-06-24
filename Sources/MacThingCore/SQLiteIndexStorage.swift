@@ -110,7 +110,7 @@ private final class SQLiteDatabase {
 
     private var db: OpaquePointer?
     private let databasePath: String
-    private let derivedColumnsBackfillKey = "derivedColumnsBackfilledV2"
+    private let derivedColumnsBackfillKey = "derivedColumnsBackfilledV3"
     private let trigramBackfillKey = "trigramBackfilledV1"
 
     init(url: URL) throws {
@@ -150,6 +150,14 @@ private final class SQLiteDatabase {
                 name TEXT NOT NULL,
                 parent TEXT NOT NULL,
                 extension_name TEXT NOT NULL DEFAULT '',
+                name_length INTEGER NOT NULL DEFAULT 0,
+                name_part_length INTEGER NOT NULL DEFAULT 0,
+                name_character_count INTEGER NOT NULL DEFAULT 0,
+                path_length INTEGER NOT NULL DEFAULT 0,
+                path_part_length INTEGER NOT NULL DEFAULT 0,
+                extension_length INTEGER NOT NULL DEFAULT 0,
+                name_utf8_length INTEGER NOT NULL DEFAULT 0,
+                path_utf8_length INTEGER NOT NULL DEFAULT 0,
                 kind TEXT NOT NULL,
                 byte_size INTEGER,
                 created_at REAL,
@@ -174,6 +182,14 @@ private final class SQLiteDatabase {
             """)
         try? execute("ALTER TABLE entries ADD COLUMN attributes INTEGER NOT NULL DEFAULT 0;")
         try? execute("ALTER TABLE entries ADD COLUMN extension_name TEXT NOT NULL DEFAULT '';")
+        try? execute("ALTER TABLE entries ADD COLUMN name_length INTEGER NOT NULL DEFAULT 0;")
+        try? execute("ALTER TABLE entries ADD COLUMN name_part_length INTEGER NOT NULL DEFAULT 0;")
+        try? execute("ALTER TABLE entries ADD COLUMN name_character_count INTEGER NOT NULL DEFAULT 0;")
+        try? execute("ALTER TABLE entries ADD COLUMN path_length INTEGER NOT NULL DEFAULT 0;")
+        try? execute("ALTER TABLE entries ADD COLUMN path_part_length INTEGER NOT NULL DEFAULT 0;")
+        try? execute("ALTER TABLE entries ADD COLUMN extension_length INTEGER NOT NULL DEFAULT 0;")
+        try? execute("ALTER TABLE entries ADD COLUMN name_utf8_length INTEGER NOT NULL DEFAULT 0;")
+        try? execute("ALTER TABLE entries ADD COLUMN path_utf8_length INTEGER NOT NULL DEFAULT 0;")
         try? execute("ALTER TABLE entries ADD COLUMN file_id TEXT;")
         try? execute("ALTER TABLE entries ADD COLUMN volume_id TEXT;")
         try? execute("ALTER TABLE entries ADD COLUMN file_list_name TEXT;")
@@ -188,6 +204,14 @@ private final class SQLiteDatabase {
         try execute("CREATE INDEX IF NOT EXISTS entries_name_idx ON entries(name);")
         try execute("CREATE INDEX IF NOT EXISTS entries_parent_idx ON entries(parent);")
         try execute("CREATE INDEX IF NOT EXISTS entries_extension_idx ON entries(extension_name);")
+        try execute("CREATE INDEX IF NOT EXISTS entries_name_length_idx ON entries(name_length);")
+        try execute("CREATE INDEX IF NOT EXISTS entries_name_part_length_idx ON entries(name_part_length);")
+        try execute("CREATE INDEX IF NOT EXISTS entries_name_character_count_idx ON entries(name_character_count);")
+        try execute("CREATE INDEX IF NOT EXISTS entries_path_length_idx ON entries(path_length);")
+        try execute("CREATE INDEX IF NOT EXISTS entries_path_part_length_idx ON entries(path_part_length);")
+        try execute("CREATE INDEX IF NOT EXISTS entries_extension_length_idx ON entries(extension_length);")
+        try execute("CREATE INDEX IF NOT EXISTS entries_name_utf8_length_idx ON entries(name_utf8_length);")
+        try execute("CREATE INDEX IF NOT EXISTS entries_path_utf8_length_idx ON entries(path_utf8_length);")
         try execute("CREATE INDEX IF NOT EXISTS entries_kind_idx ON entries(kind);")
         try execute("CREATE INDEX IF NOT EXISTS entries_modified_idx ON entries(modified_at);")
         try execute("CREATE INDEX IF NOT EXISTS entries_created_idx ON entries(created_at);")
@@ -237,6 +261,40 @@ private final class SQLiteDatabase {
         return tableCount == 4
     }
 
+    private struct DerivedLengthValues {
+        let extensionName: String
+        let nameLength: Int
+        let namePartLength: Int
+        let nameCharacterCount: Int
+        let pathLength: Int
+        let pathPartLength: Int
+        let extensionLength: Int
+        let nameUTF8Length: Int
+        let pathUTF8Length: Int
+    }
+
+    private func derivedLengthValues(path: String, name: String, parent: String) -> DerivedLengthValues {
+        let extensionName = URL(fileURLWithPath: name).pathExtension.lowercased()
+        let namePart: String
+        if !extensionName.isEmpty, name.count > extensionName.count + 1 {
+            namePart = String(name.dropLast(extensionName.count + 1))
+        } else {
+            namePart = name
+        }
+
+        return DerivedLengthValues(
+            extensionName: extensionName,
+            nameLength: name.utf16.count,
+            namePartLength: namePart.utf16.count,
+            nameCharacterCount: name.count,
+            pathLength: path.utf16.count,
+            pathPartLength: SearchEngine.normalizedFolderPath(parent).utf16.count,
+            extensionLength: extensionName.utf16.count,
+            nameUTF8Length: name.utf8.count,
+            pathUTF8Length: path.utf8.count
+        )
+    }
+
     private func backfillDerivedColumnsIfNeeded() throws {
         if try stringMetaValue(forKey: derivedColumnsBackfillKey) == "1" {
             return
@@ -245,32 +303,56 @@ private final class SQLiteDatabase {
         struct DerivedRow {
             let path: String
             let name: String
+            let parent: String
             let kind: FileKind
             let attributes: FileAttributes
         }
 
         let rows = try query(
             """
-            SELECT path, name, kind, attributes
+            SELECT path, name, parent, kind, attributes
             FROM entries;
             """
         ) { statement in
             let path = statement.text(at: 0) ?? ""
             let name = statement.text(at: 1) ?? ""
-            let kind = FileKind(rawValue: statement.text(at: 2) ?? "") ?? .other
-            let rawAttributes = statement.optionalInt(at: 3) ?? 0
+            let parent = statement.text(at: 2) ?? ""
+            let kind = FileKind(rawValue: statement.text(at: 3) ?? "") ?? .other
+            let rawAttributes = statement.optionalInt(at: 4) ?? 0
             let attributes = rawAttributes == 0
                 ? FileAttributes.inferred(kind: kind, name: name, path: path)
                 : FileAttributes(rawValue: rawAttributes)
-            return DerivedRow(path: path, name: name, kind: kind, attributes: attributes)
+            return DerivedRow(path: path, name: name, parent: parent, kind: kind, attributes: attributes)
         }
 
         try transaction {
-            try withStatement("UPDATE entries SET extension_name = ?, attributes = ? WHERE path = ?;") { statement in
+            try withStatement("""
+                UPDATE entries
+                SET extension_name = ?,
+                    name_length = ?,
+                    name_part_length = ?,
+                    name_character_count = ?,
+                    path_length = ?,
+                    path_part_length = ?,
+                    extension_length = ?,
+                    name_utf8_length = ?,
+                    path_utf8_length = ?,
+                    attributes = ?
+                WHERE path = ?;
+                """) { statement in
                 for row in rows {
+                    let derived = derivedLengthValues(path: row.path, name: row.name, parent: row.parent)
                     try statement.reset()
                     try statement.bind([
-                        .text(URL(fileURLWithPath: row.name).pathExtension.lowercased()),
+                        .text(derived.extensionName),
+                        .int(Int64(derived.nameLength)),
+                        .int(Int64(derived.namePartLength)),
+                        .int(Int64(derived.nameCharacterCount)),
+                        .int(Int64(derived.pathLength)),
+                        .int(Int64(derived.pathPartLength)),
+                        .int(Int64(derived.extensionLength)),
+                        .int(Int64(derived.nameUTF8Length)),
+                        .int(Int64(derived.pathUTF8Length)),
                         .int(Int64(row.attributes.rawValue)),
                         .text(row.path)
                     ])
@@ -668,6 +750,22 @@ private final class SQLiteDatabase {
                         + CASE WHEN length(\(prefix)parent) > 0 THEN 1 ELSE 0 END
                 END)
                 """
+        case .characterCount:
+            return "\(prefix)name_character_count"
+        case .nameLength:
+            return "\(prefix)name_length"
+        case .namePartLength:
+            return "\(prefix)name_part_length"
+        case .nameUTF8Length:
+            return "\(prefix)name_utf8_length"
+        case .pathLength:
+            return "\(prefix)path_length"
+        case .pathUTF8Length:
+            return "\(prefix)path_utf8_length"
+        case .pathPartLength:
+            return "\(prefix)path_part_length"
+        case .extensionLength:
+            return "\(prefix)extension_length"
         }
     }
 
@@ -734,11 +832,13 @@ private final class SQLiteDatabase {
     private func insert(entries: [FileEntry]) throws {
         let entrySQL = """
             INSERT OR REPLACE INTO entries (
-                path, name, parent, extension_name, kind, byte_size, created_at, modified_at,
+                path, name, parent, extension_name, name_length, name_part_length,
+                name_character_count, path_length, path_part_length, extension_length,
+                name_utf8_length, path_utf8_length, kind, byte_size, created_at, modified_at,
                 accessed_at, indexed_at, run_count, last_run_at, attributes, file_id, volume_id,
                 file_list_name, file_list_path, media_title, media_artist, media_album, media_comment,
                 media_genre, media_track, media_year
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """
         let ftsSQL = "INSERT INTO entries_fts(path, name, parent) VALUES (?, ?, ?);"
         let trigramSQL = "INSERT INTO entries_trigram(path) VALUES (?);"
@@ -747,12 +847,21 @@ private final class SQLiteDatabase {
             try withStatement(ftsSQL) { ftsStatement in
                 try withStatement(trigramSQL) { trigramStatement in
                     for entry in entries {
+                        let derived = derivedLengthValues(path: entry.path, name: entry.name, parent: entry.parent)
                         try entryStatement.reset()
                         try entryStatement.bind([
                             .text(entry.path),
                             .text(entry.name),
                             .text(entry.parent),
-                            .text(entry.extensionName.lowercased()),
+                            .text(derived.extensionName),
+                            .int(Int64(derived.nameLength)),
+                            .int(Int64(derived.namePartLength)),
+                            .int(Int64(derived.nameCharacterCount)),
+                            .int(Int64(derived.pathLength)),
+                            .int(Int64(derived.pathPartLength)),
+                            .int(Int64(derived.extensionLength)),
+                            .int(Int64(derived.nameUTF8Length)),
+                            .int(Int64(derived.pathUTF8Length)),
                             .text(entry.kind.rawValue),
                             .optionalInt64(entry.byteSize),
                             .optionalDate(entry.createdAt),
