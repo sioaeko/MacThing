@@ -16,6 +16,49 @@ public struct IndexSnapshot: Codable, Sendable {
     }
 }
 
+public struct IndexPersistenceDelta: Sendable {
+    public let upsertedEntries: [FileEntry]
+    public let removedPaths: [String]
+
+    public init(upsertedEntries: [FileEntry], removedPaths: [String]) {
+        self.upsertedEntries = upsertedEntries
+        self.removedPaths = removedPaths
+    }
+
+    public static func pruned(
+        upsertedEntries: [FileEntry],
+        removedPaths: [String],
+        existingEntriesByPath: [String: FileEntry]
+    ) -> IndexPersistenceDelta {
+        let upsertedPaths = Set(upsertedEntries.map(\.path))
+        let prunedRemovedPaths = stableUnique(removedPaths).filter { !upsertedPaths.contains($0) }
+        let prunedUpsertedEntries = upsertedEntries.filter { entry in
+            guard let previousEntry = existingEntriesByPath[entry.path] else {
+                return true
+            }
+            return !entry.hasSamePersistentCatalogState(as: previousEntry)
+        }
+
+        return IndexPersistenceDelta(
+            upsertedEntries: prunedUpsertedEntries,
+            removedPaths: prunedRemovedPaths
+        )
+    }
+
+    private static func stableUnique(_ paths: [String]) -> [String] {
+        var seen = Set<String>()
+        var unique: [String] = []
+        unique.reserveCapacity(paths.count)
+
+        for path in paths where !seen.contains(path) {
+            seen.insert(path)
+            unique.append(path)
+        }
+
+        return unique
+    }
+}
+
 public enum IndexStorage {
     public static func applicationSupportDirectory() throws -> URL {
         let supportURL = try FileManager.default.url(

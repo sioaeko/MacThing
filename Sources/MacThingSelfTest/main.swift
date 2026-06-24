@@ -4364,6 +4364,71 @@ expect(
     "internal volume profiles should not require the extra volume confirmation"
 )
 
+let previousPersistentEntry = document.recordingRun(at: Date(timeIntervalSince1970: 7_000))
+let reindexedPersistentEntry = FileEntry(
+    path: previousPersistentEntry.path,
+    name: previousPersistentEntry.name,
+    parent: previousPersistentEntry.parent,
+    kind: previousPersistentEntry.kind,
+    byteSize: previousPersistentEntry.byteSize,
+    createdAt: previousPersistentEntry.createdAt,
+    modifiedAt: previousPersistentEntry.modifiedAt,
+    accessedAt: previousPersistentEntry.accessedAt,
+    indexedAt: Date(timeIntervalSince1970: 8_000),
+    runCount: previousPersistentEntry.runCount,
+    lastRunAt: previousPersistentEntry.lastRunAt,
+    attributes: previousPersistentEntry.attributes,
+    fileID: previousPersistentEntry.fileID,
+    volumeID: previousPersistentEntry.volumeID,
+    mediaTitle: previousPersistentEntry.mediaTitle,
+    mediaArtist: previousPersistentEntry.mediaArtist,
+    mediaAlbum: previousPersistentEntry.mediaAlbum,
+    mediaComment: previousPersistentEntry.mediaComment,
+    mediaGenre: previousPersistentEntry.mediaGenre,
+    mediaTrack: previousPersistentEntry.mediaTrack,
+    mediaYear: previousPersistentEntry.mediaYear
+)
+expect(
+    reindexedPersistentEntry.hasSamePersistentCatalogState(as: previousPersistentEntry),
+    "persistent catalog state should ignore indexedAt-only rescans"
+)
+
+let changedPersistentEntry = FileEntry(
+    path: previousPersistentEntry.path,
+    name: previousPersistentEntry.name,
+    parent: previousPersistentEntry.parent,
+    kind: previousPersistentEntry.kind,
+    byteSize: 9_999,
+    createdAt: previousPersistentEntry.createdAt,
+    modifiedAt: previousPersistentEntry.modifiedAt,
+    accessedAt: previousPersistentEntry.accessedAt,
+    indexedAt: Date(timeIntervalSince1970: 8_100),
+    runCount: previousPersistentEntry.runCount,
+    lastRunAt: previousPersistentEntry.lastRunAt,
+    attributes: previousPersistentEntry.attributes,
+    fileID: previousPersistentEntry.fileID,
+    volumeID: previousPersistentEntry.volumeID
+)
+let newPersistentEntry = FileEntry(
+    path: "/Users/me/Documents/New Persistent.md",
+    name: "New Persistent.md",
+    parent: "/Users/me/Documents",
+    kind: .file,
+    byteSize: 32,
+    modifiedAt: Date(timeIntervalSince1970: 8_200),
+    indexedAt: Date(timeIntervalSince1970: 8_200)
+)
+let persistenceDelta = IndexPersistenceDelta.pruned(
+    upsertedEntries: [reindexedPersistentEntry, changedPersistentEntry, newPersistentEntry],
+    removedPaths: [reindexedPersistentEntry.path, changedPersistentEntry.path, "/Users/me/Documents/Old Persistent.md"],
+    existingEntriesByPath: [previousPersistentEntry.path: previousPersistentEntry]
+)
+expect(
+    persistenceDelta.removedPaths == ["/Users/me/Documents/Old Persistent.md"] &&
+        persistenceDelta.upsertedEntries.map(\.path) == [changedPersistentEntry.path, newPersistentEntry.path],
+    "incremental persistence should prune unchanged rescans and same-path delete/upsert churn"
+)
+
 do {
     let temporaryDirectory = FileManager.default.temporaryDirectory
         .appending(path: "MacThingSelfTest-\(UUID().uuidString)", directoryHint: .isDirectory)

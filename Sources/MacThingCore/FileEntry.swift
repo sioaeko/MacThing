@@ -248,6 +248,31 @@ public struct FileEntry: Codable, Hashable, Identifiable, Sendable {
         return "\(volumeID):\(fileID)"
     }
 
+    public func hasSamePersistentCatalogState(as other: FileEntry) -> Bool {
+        path == other.path &&
+            name == other.name &&
+            parent == other.parent &&
+            kind == other.kind &&
+            byteSize == other.byteSize &&
+            createdAt == other.createdAt &&
+            modifiedAt == other.modifiedAt &&
+            accessedAt == other.accessedAt &&
+            runCount == other.runCount &&
+            lastRunAt == other.lastRunAt &&
+            attributes == other.attributes &&
+            fileID == other.fileID &&
+            volumeID == other.volumeID &&
+            fileListName == other.fileListName &&
+            fileListPath == other.fileListPath &&
+            mediaTitle == other.mediaTitle &&
+            mediaArtist == other.mediaArtist &&
+            mediaAlbum == other.mediaAlbum &&
+            mediaComment == other.mediaComment &&
+            mediaGenre == other.mediaGenre &&
+            mediaTrack == other.mediaTrack &&
+            mediaYear == other.mediaYear
+    }
+
     public func preservingRunState(from previousEntry: FileEntry) -> FileEntry {
         FileEntry(
             path: path,

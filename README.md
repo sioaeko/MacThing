@@ -226,6 +226,8 @@ The current packaged release is available from GitHub:
   flags, apply changed-path subtree updates to the matching profile database,
   scan parent folders for rename/remove events, and fall back to profile-scoped
   full refreshes for dropped or broad changes.
+- Incremental persistence prunes indexed-date-only rescans and same-path
+  delete/upsert churn, keeping rename/remove parent scans lighter.
 - Index profiles track the last seen FSEvents event ID while running, but app
   launch resumes monitoring from the current event stream so old backlog does
   not trigger a full refresh on every start.
@@ -353,7 +355,7 @@ ranking behavior through a normal executable target instead.
 
 ## Roadmap
 
-1. Add inode-aware rename/move pairing for even tighter FSEvents updates.
+1. Continue tightening inode-aware rename/move pairing for FSEvents updates.
 2. Push more Everything query functions into SQLite candidate pruning for large
    indexes while preserving substring-search correctness.
 3. Automate notarization and add a first-run onboarding checklist for release

@@ -2003,9 +2003,14 @@ final class SearchStore: ObservableObject {
         statusText = "\(entries.count.formatted()) items\(enabledProfileCount > 1 ? " across \(enabledProfileCount) profiles" : "")"
         updateQueryServiceState()
         scheduleSearch()
-        persistIncremental(
+        let persistenceDelta = IndexPersistenceDelta.pruned(
             upsertedEntries: upsertedEntries,
             removedPaths: removedPaths,
+            existingEntriesByPath: existingEntriesByPath
+        )
+        persistIncremental(
+            upsertedEntries: persistenceDelta.upsertedEntries,
+            removedPaths: persistenceDelta.removedPaths,
             profileID: profileID,
             rootPath: rootPath
         )
@@ -2100,6 +2105,9 @@ final class SearchStore: ObservableObject {
         guard let indexURL = activeIndexURL else {
             return
         }
+        guard !upsertedEntries.isEmpty || !removedPaths.isEmpty else {
+            return
+        }
 
         let rootPath = rootPath
         Task.detached(priority: .utility) {
@@ -2115,6 +2123,9 @@ final class SearchStore: ObservableObject {
         rootPath: String
     ) {
         guard let indexURL = try? IndexStorage.profileIndexURL(profileID: profileID) else {
+            return
+        }
+        guard !upsertedEntries.isEmpty || !removedPaths.isEmpty else {
             return
         }
 
