@@ -86,7 +86,8 @@ The current packaged release is available from GitHub:
   to parent/path candidates, reducing slow path scans for common short terms.
 - SQLite candidate seeding also applies supported structured filters such as
   extension, kind/category, file size, dates, and file attributes when they are
-  combined with text terms.
+  combined with text terms, plus exact direct-parent filters and safe
+  parent/ancestor path text filters.
 - File-name, path, wildcard, regex, and compact fuzzy matching. Wildcard and
   regex searches honor the same case/diacritic matching options as text search.
 - Match path, fuzzy, regex, case-sensitive, whole-word, and diacritic-sensitive

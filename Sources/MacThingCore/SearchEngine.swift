@@ -984,12 +984,16 @@ public enum SearchEngine {
                     if !value.isEmpty {
                         terms.append(value)
                     }
-                case "parent", "infolder", "nosubfolders", "parentpath", "parentfullpath":
+                case "parent", "infolder", "nosubfolders":
                     let normalizedParent = normalizedFolderPath(value)
                     if isAbsoluteSearchPath(normalizedParent) {
                         parentPaths.insert(normalizedParent)
                     } else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                case "parentpath", "parentfullpath", "parentname", "ancestor", "ancestorname":
+                    if !value.isEmpty {
+                        terms.append(value)
                     }
                 case "ext", "extension":
                     if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -1178,7 +1182,6 @@ public enum SearchEngine {
                      "ancestorattribute", "ancestorattributes",
                      "ancestorchild", "ancestorchildfile", "ancestorchildfolder",
                      "pathlist", "fullpathlist",
-                     "parentname", "ancestorname",
                      "parentchild", "parentchildname", "parentchildfile",
                      "parentchildfilename", "parentchildfolder", "parentchildfoldername",
                      "parentchilddir", "parentchilddirname",
@@ -1192,7 +1195,7 @@ public enum SearchEngine {
                      "album", "artist", "comment", "genre", "title", "track", "year",
                      "root", "width", "height", "bitdepth",
                      "dimension", "dimensions", "orientation", "aspect-ratio",
-                     "aspectratio", "ancestor", "parents", "parentcount", "depth",
+                     "aspectratio", "parents", "parentcount", "depth",
                      "shell":
                     return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                 default:

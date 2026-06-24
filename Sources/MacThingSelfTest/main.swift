@@ -3073,9 +3073,17 @@ expect(
 let parentPathHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch parent-path:/Users/me/Documents"))
 expect(
     parentPathHint.canUseDatabaseCandidates &&
-        parentPathHint.terms == ["launch"] &&
-        parentPathHint.parentPaths == ["/Users/me/Documents"],
-    "absolute parent-path filters should be pushed into SQLite candidate hints"
+        parentPathHint.terms == ["launch", "/Users/me/Documents"] &&
+        parentPathHint.parentPaths.isEmpty,
+    "parent-path filters should use text candidate terms instead of exact parent filters"
+)
+
+let partialParentPathHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch parent-path:/Users/me/Doc"))
+expect(
+    partialParentPathHint.canUseDatabaseCandidates &&
+        partialParentPathHint.terms == ["launch", "/Users/me/Doc"] &&
+        partialParentPathHint.parentPaths.isEmpty,
+    "partial parent-path filters should remain safe text candidate terms"
 )
 
 let relativeParentHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch parent:Documents"))
@@ -3086,8 +3094,9 @@ expect(
 
 let relativeParentPathHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch parent-path:Documents"))
 expect(
-    relativeParentPathHint.canUseDatabaseCandidates == false,
-    "relative parent-path filters should avoid lossy SQLite candidate prefiltering"
+    relativeParentPathHint.canUseDatabaseCandidates &&
+        relativeParentPathHint.terms == ["launch", "Documents"],
+    "relative parent-path filters should use SQLite candidate terms"
 )
 
 let parentPlusHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch parent+1:/Users/me/Documents"))
@@ -3116,14 +3125,23 @@ expect(
 
 let ancestorHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch ancestor:/Users/me/Documents"))
 expect(
-    ancestorHint.canUseDatabaseCandidates == false,
-    "ancestor: searches should avoid lossy SQLite candidate prefiltering"
+    ancestorHint.canUseDatabaseCandidates &&
+        ancestorHint.terms == ["launch", "/Users/me/Documents"],
+    "absolute ancestor: searches should use path text candidate terms"
 )
 
 let parentNameHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch parent-name:Documents"))
 expect(
-    parentNameHint.canUseDatabaseCandidates == false,
-    "parent-name: searches should avoid lossy SQLite candidate prefiltering"
+    parentNameHint.canUseDatabaseCandidates &&
+        parentNameHint.terms == ["launch", "Documents"],
+    "parent-name: searches should use parent text candidate terms"
+)
+
+let ancestorNameHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch ancestor-name:Documents"))
+expect(
+    ancestorNameHint.canUseDatabaseCandidates &&
+        ancestorNameHint.terms == ["launch", "Documents"],
+    "ancestor-name: searches should use ancestor text candidate terms"
 )
 
 let parentChildHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch parent-child:Empty"))
@@ -4903,7 +4921,20 @@ do {
     let parentPathLaunchCandidates = try IndexStorage.candidateEntries(hint: parentPathLaunchHint, limit: 20, from: databaseURL)
     expect(
         Set(parentPathLaunchCandidates.map(\.path)) == Set([document.path, folder.path]),
-        "SQLite candidate search should apply direct parent-path filters"
+        "SQLite candidate search should apply parent-path text filters"
+    )
+
+    let partialParentPathLaunchHint = SearchEngine.candidateHint(
+        for: SearchRequest(query: "launch parent-path:/Users/me/Doc")
+    )
+    let partialParentPathLaunchCandidates = try IndexStorage.candidateEntries(
+        hint: partialParentPathLaunchHint,
+        limit: 20,
+        from: databaseURL
+    )
+    expect(
+        Set(partialParentPathLaunchCandidates.map(\.path)) == Set([document.path, folder.path]),
+        "SQLite candidate search should preserve partial parent-path matches"
     )
 
     let hiddenHint = SearchEngine.candidateHint(for: SearchRequest(query: "secret hidden:"))
