@@ -684,6 +684,18 @@ private final class SQLiteDatabase {
             clauses.append("\(prefix)byte_size IS NULL")
         }
 
+        if hint.requiresEmptyEntry {
+            let filter = emptyEntryFilter(prefix: prefix, outerPathExpression: outerPathExpression(tablePrefix: tablePrefix), isEmpty: true)
+            clauses.append(filter.clause)
+            bindings.append(contentsOf: filter.bindings)
+        }
+
+        if hint.requiresNonEmptyEntry {
+            let filter = emptyEntryFilter(prefix: prefix, outerPathExpression: outerPathExpression(tablePrefix: tablePrefix), isEmpty: false)
+            clauses.append(filter.clause)
+            bindings.append(contentsOf: filter.bindings)
+        }
+
         for filter in hint.dateFilters {
             clauses.append("\(prefix)\(column(for: filter.field)) \(sqlOperator(for: filter.op)) ?")
             bindings.append(.date(filter.value))
@@ -725,6 +737,30 @@ private final class SQLiteDatabase {
         }
 
         return SQLiteCandidateFilter(clauses: clauses, bindings: bindings)
+    }
+
+    private func outerPathExpression(tablePrefix: String?) -> String {
+        tablePrefix.map { "\($0).path" } ?? "entries.path"
+    }
+
+    private func emptyEntryFilter(prefix: String, outerPathExpression: String, isEmpty: Bool) -> (clause: String, bindings: [SQLiteValue]) {
+        let fileKinds = [FileKind.file, .symlink, .other].map(\.rawValue)
+        let containerKinds = [FileKind.folder, .package].map(\.rawValue)
+        let fileClause = isEmpty
+            ? "\(prefix)byte_size = 0"
+            : "(\(prefix)byte_size IS NULL OR \(prefix)byte_size != 0)"
+        let childPresenceClause = isEmpty
+            ? "NOT EXISTS (SELECT 1 FROM entries AS child WHERE child.parent = \(outerPathExpression) LIMIT 1)"
+            : "EXISTS (SELECT 1 FROM entries AS child WHERE child.parent = \(outerPathExpression) LIMIT 1)"
+        let clause = """
+            (
+                (\(prefix)kind IN (\(placeholders(count: fileKinds.count))) AND \(fileClause))
+                OR
+                (\(prefix)kind IN (\(placeholders(count: containerKinds.count))) AND \(childPresenceClause))
+            )
+            """
+        let bindings = (fileKinds + containerKinds).map(SQLiteValue.text)
+        return (clause, bindings)
     }
 
     private func placeholders(count: Int) -> String {

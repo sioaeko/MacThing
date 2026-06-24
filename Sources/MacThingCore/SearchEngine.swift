@@ -617,6 +617,8 @@ public struct SearchCandidateHint: Sendable {
     public let fileReferenceFilter: SearchCandidateFileReferenceFilter?
     public let requiresFileListSource: Bool
     public let rootOnly: Bool
+    public let requiresEmptyEntry: Bool
+    public let requiresNonEmptyEntry: Bool
     public let parentPaths: Set<String>
 
     public init(
@@ -634,6 +636,8 @@ public struct SearchCandidateHint: Sendable {
         fileReferenceFilter: SearchCandidateFileReferenceFilter? = nil,
         requiresFileListSource: Bool = false,
         rootOnly: Bool = false,
+        requiresEmptyEntry: Bool = false,
+        requiresNonEmptyEntry: Bool = false,
         parentPaths: Set<String> = []
     ) {
         self.terms = terms
@@ -650,6 +654,8 @@ public struct SearchCandidateHint: Sendable {
         self.fileReferenceFilter = fileReferenceFilter
         self.requiresFileListSource = requiresFileListSource
         self.rootOnly = rootOnly
+        self.requiresEmptyEntry = requiresEmptyEntry
+        self.requiresNonEmptyEntry = requiresNonEmptyEntry
         self.parentPaths = parentPaths
     }
 
@@ -666,6 +672,8 @@ public struct SearchCandidateHint: Sendable {
             fileReferenceFilter != nil ||
             requiresFileListSource ||
             rootOnly ||
+            requiresEmptyEntry ||
+            requiresNonEmptyEntry ||
             !parentPaths.isEmpty
     }
 
@@ -856,6 +864,8 @@ public enum SearchEngine {
         var fileReferenceFilter: SearchCandidateFileReferenceFilter?
         var requiresFileListSource = false
         var rootOnly = false
+        var requiresEmptyEntry = false
+        var requiresNonEmptyEntry = false
         var parentPaths = Set<String>()
 
         func addTerm(_ value: String) {
@@ -1341,8 +1351,14 @@ public enum SearchEngine {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
                     rootOnly = true
+                case "empty":
+                    if isExplicitFalseBoolean(value) {
+                        requiresNonEmptyEntry = true
+                    } else {
+                        requiresEmptyEntry = true
+                    }
                 case "content", "ansicontent", "utf8content", "utf16content", "utf16becontent",
-                     "regex", "dupe", "dupename", "empty", "nothing",
+                     "regex", "dupe", "dupename", "nothing",
                      "exists", "fileexists", "folderexists",
                      "child", "childname", "childcount", "children",
                      "childfilecount", "childfiles", "childfoldercount",
@@ -1416,6 +1432,8 @@ public enum SearchEngine {
             fileReferenceFilter != nil ||
             requiresFileListSource ||
             rootOnly ||
+            requiresEmptyEntry ||
+            requiresNonEmptyEntry ||
             !parentPaths.isEmpty
         return SearchCandidateHint(
             terms: uniqueTerms,
@@ -1432,6 +1450,8 @@ public enum SearchEngine {
             fileReferenceFilter: fileReferenceFilter,
             requiresFileListSource: requiresFileListSource,
             rootOnly: rootOnly,
+            requiresEmptyEntry: requiresEmptyEntry,
+            requiresNonEmptyEntry: requiresNonEmptyEntry,
             parentPaths: parentPaths
         )
     }

@@ -3501,6 +3501,20 @@ expect(
     "nothing: searches should avoid unnecessary SQLite candidate prefiltering"
 )
 
+let emptyHint = SearchEngine.candidateHint(for: SearchRequest(query: "empty:"))
+expect(
+    emptyHint.canUseDatabaseCandidates &&
+        emptyHint.requiresEmptyEntry,
+    "empty: searches should be pushed into SQLite candidate hints"
+)
+
+let nonEmptyHint = SearchEngine.candidateHint(for: SearchRequest(query: "empty:0"))
+expect(
+    nonEmptyHint.canUseDatabaseCandidates &&
+        nonEmptyHint.requiresNonEmptyEntry,
+    "empty:0 searches should be pushed into SQLite candidate hints"
+)
+
 let rootHint = SearchEngine.candidateHint(for: SearchRequest(query: "root:"))
 expect(
     rootHint.canUseDatabaseCandidates &&
@@ -5409,6 +5423,31 @@ do {
     expect(
         unknownSizeCandidates.map(\.path) == [folder.path],
         "SQLite candidate search should apply unknown size filters"
+    )
+
+    let emptyCandidateDatabaseURL = temporaryDirectory.appending(path: "EmptyCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: "/Users/me", entries: [emptyFile, document, folder, childInFolder]),
+        to: emptyCandidateDatabaseURL
+    )
+    let emptyCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "empty:")),
+        limit: 20,
+        from: emptyCandidateDatabaseURL
+    )
+    expect(
+        emptyCandidates.map(\.path) == [emptyFile.path],
+        "SQLite candidate search should apply empty-entry filters"
+    )
+
+    let nonEmptyCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "empty:0")),
+        limit: 20,
+        from: emptyCandidateDatabaseURL
+    )
+    expect(
+        Set(nonEmptyCandidates.map(\.path)) == Set([document.path, folder.path, childInFolder.path]),
+        "SQLite candidate search should apply non-empty-entry filters"
     )
 
     let todayLaunchHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch dm:today"))
