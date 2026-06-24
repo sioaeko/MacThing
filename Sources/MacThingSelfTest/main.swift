@@ -3320,8 +3320,32 @@ expect(
 
 let frnHint = SearchEngine.candidateHint(for: SearchRequest(query: "frn:12345"))
 expect(
-    frnHint.canUseDatabaseCandidates == false,
-    "frn: searches should avoid lossy SQLite candidate prefiltering"
+    frnHint.canUseDatabaseCandidates &&
+        frnHint.fileReferenceFilter?.fileID == "12345" &&
+        frnHint.fileReferenceFilter?.volumeID == nil,
+    "frn: file-id searches should be pushed into SQLite candidate hints"
+)
+
+let volumeQualifiedFRNHint = SearchEngine.candidateHint(for: SearchRequest(query: "frn:678:12345"))
+expect(
+    volumeQualifiedFRNHint.canUseDatabaseCandidates &&
+        volumeQualifiedFRNHint.fileReferenceFilter?.fileID == "12345" &&
+        volumeQualifiedFRNHint.fileReferenceFilter?.volumeID == "678",
+    "volume-qualified frn: searches should be pushed into SQLite candidate hints"
+)
+
+let emptyFRNHint = SearchEngine.candidateHint(for: SearchRequest(query: "frn:"))
+expect(
+    emptyFRNHint.canUseDatabaseCandidates &&
+        emptyFRNHint.fileReferenceFilter?.fileID == nil &&
+        emptyFRNHint.fileReferenceFilter?.volumeID == nil,
+    "empty frn: searches should be pushed into SQLite identity-presence hints"
+)
+
+let listedFRNHint = SearchEngine.candidateHint(for: SearchRequest(query: "frn:12345;999"))
+expect(
+    listedFRNHint.canUseDatabaseCandidates == false,
+    "semicolon frn: searches should avoid lossy SQLite candidate prefiltering"
 )
 
 let fsiHint = SearchEngine.candidateHint(for: SearchRequest(query: "fsi:0"))
@@ -5034,6 +5058,41 @@ do {
     expect(
         Set(partialParentPathLaunchCandidates.map(\.path)) == Set([document.path, folder.path]),
         "SQLite candidate search should preserve partial parent-path matches"
+    )
+
+    let identityCandidateDatabaseURL = temporaryDirectory.appending(path: "IdentityCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: temporaryDirectory.path, entries: [identitySearchEntry, otherIdentitySearchEntry, document]),
+        to: identityCandidateDatabaseURL
+    )
+    let frnCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "frn:12345")),
+        limit: 20,
+        from: identityCandidateDatabaseURL
+    )
+    expect(
+        frnCandidates.map(\.path) == [identitySearchEntry.path],
+        "SQLite candidate search should apply file reference number filters"
+    )
+
+    let qualifiedFRNCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "frn:678:12345")),
+        limit: 20,
+        from: identityCandidateDatabaseURL
+    )
+    expect(
+        qualifiedFRNCandidates.map(\.path) == [identitySearchEntry.path],
+        "SQLite candidate search should apply volume-qualified file reference filters"
+    )
+
+    let identityPresenceCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "frn:")),
+        limit: 20,
+        from: identityCandidateDatabaseURL
+    )
+    expect(
+        Set(identityPresenceCandidates.map(\.path)) == Set([identitySearchEntry.path, otherIdentitySearchEntry.path]),
+        "SQLite candidate search should apply file identity presence filters"
     )
 
     let broadPathFTSDecoys = (0..<25).map { index in

@@ -583,6 +583,16 @@ public struct SearchCandidateMediaTextFilter: Sendable {
     }
 }
 
+public struct SearchCandidateFileReferenceFilter: Sendable {
+    public let fileID: String?
+    public let volumeID: String?
+
+    public init(fileID: String?, volumeID: String? = nil) {
+        self.fileID = fileID
+        self.volumeID = volumeID
+    }
+}
+
 public struct SearchCandidateHint: Sendable {
     public let terms: [String]
     public let canUseDatabaseCandidates: Bool
@@ -593,6 +603,7 @@ public struct SearchCandidateHint: Sendable {
     public let numericFilters: [SearchCandidateNumericFilter]
     public let dateFilters: [SearchCandidateDateFilter]
     public let mediaTextFilters: [SearchCandidateMediaTextFilter]
+    public let fileReferenceFilter: SearchCandidateFileReferenceFilter?
     public let parentPaths: Set<String>
 
     public init(
@@ -605,6 +616,7 @@ public struct SearchCandidateHint: Sendable {
         numericFilters: [SearchCandidateNumericFilter] = [],
         dateFilters: [SearchCandidateDateFilter] = [],
         mediaTextFilters: [SearchCandidateMediaTextFilter] = [],
+        fileReferenceFilter: SearchCandidateFileReferenceFilter? = nil,
         parentPaths: Set<String> = []
     ) {
         self.terms = terms
@@ -616,6 +628,7 @@ public struct SearchCandidateHint: Sendable {
         self.numericFilters = numericFilters
         self.dateFilters = dateFilters
         self.mediaTextFilters = mediaTextFilters
+        self.fileReferenceFilter = fileReferenceFilter
         self.parentPaths = parentPaths
     }
 
@@ -627,6 +640,7 @@ public struct SearchCandidateHint: Sendable {
             !numericFilters.isEmpty ||
             !dateFilters.isEmpty ||
             !mediaTextFilters.isEmpty ||
+            fileReferenceFilter != nil ||
             !parentPaths.isEmpty
     }
 
@@ -812,6 +826,7 @@ public enum SearchEngine {
         var numericFilters: [SearchCandidateNumericFilter] = []
         var dateFilters: [SearchCandidateDateFilter] = []
         var mediaTextFilters: [SearchCandidateMediaTextFilter] = []
+        var fileReferenceFilter: SearchCandidateFileReferenceFilter?
         var parentPaths = Set<String>()
 
         func addTerm(_ value: String) {
@@ -937,6 +952,26 @@ public enum SearchEngine {
             default:
                 return nil
             }
+        }
+
+        func normalizedFileReferenceValue(_ value: String) -> String {
+            value
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+                .replacingOccurrences(of: " ", with: "")
+        }
+
+        func makeFileReferenceFilter(for value: String) -> SearchCandidateFileReferenceFilter {
+            let normalizedValue = normalizedFileReferenceValue(value)
+            guard !normalizedValue.isEmpty else {
+                return SearchCandidateFileReferenceFilter(fileID: nil)
+            }
+            guard let colonIndex = normalizedValue.firstIndex(of: ":") else {
+                return SearchCandidateFileReferenceFilter(fileID: normalizedValue)
+            }
+            let volumeID = String(normalizedValue[..<colonIndex])
+            let fileID = String(normalizedValue[normalizedValue.index(after: colonIndex)...])
+            return SearchCandidateFileReferenceFilter(fileID: fileID, volumeID: volumeID)
         }
 
         for rawToken in tokens {
@@ -1191,6 +1226,8 @@ public enum SearchEngine {
                     if value.isEmpty || request.options.diacriticSensitive {
                         mediaTextFilters.append(SearchCandidateMediaTextFilter(field: field, value: value))
                     }
+                case "frn":
+                    fileReferenceFilter = makeFileReferenceFilter(for: value)
                 case "content", "ansicontent", "utf8content", "utf16content", "utf16becontent",
                      "regex", "dupe", "dupename", "empty", "nothing",
                      "exists", "fileexists", "folderexists",
@@ -1250,7 +1287,7 @@ public enum SearchEngine {
                      "ancestorsibling", "ancestorsiblingfile", "ancestorsiblingfolder",
                      "namepartdupe", "sizedupe",
                      "attribdupe", "attrdupe", "dadupe", "dcdupe",
-                     "dmdupe", "filelist", "filelistfilename", "filelistname", "filelistpath", "frn", "fsi",
+                     "dmdupe", "filelist", "filelistfilename", "filelistname", "filelistpath", "fsi",
                      "root", "width", "height", "bitdepth",
                      "dimension", "dimensions", "orientation", "aspect-ratio",
                      "aspectratio", "parents", "parentcount", "depth",
@@ -1272,6 +1309,7 @@ public enum SearchEngine {
             !numericFilters.isEmpty ||
             !dateFilters.isEmpty ||
             !mediaTextFilters.isEmpty ||
+            fileReferenceFilter != nil ||
             !parentPaths.isEmpty
         return SearchCandidateHint(
             terms: uniqueTerms,
@@ -1283,6 +1321,7 @@ public enum SearchEngine {
             numericFilters: numericFilters,
             dateFilters: dateFilters,
             mediaTextFilters: mediaTextFilters,
+            fileReferenceFilter: fileReferenceFilter,
             parentPaths: parentPaths
         )
     }

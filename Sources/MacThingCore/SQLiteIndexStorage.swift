@@ -603,6 +603,19 @@ private final class SQLiteDatabase {
             }
         }
 
+        if let filter = hint.fileReferenceFilter {
+            if let fileID = filter.fileID, !fileID.isEmpty {
+                clauses.append("LOWER(\(prefix)file_id) = ?")
+                bindings.append(.text(fileID.lowercased()))
+                if let volumeID = filter.volumeID, !volumeID.isEmpty {
+                    clauses.append("LOWER(\(prefix)volume_id) = ?")
+                    bindings.append(.text(volumeID.lowercased()))
+                }
+            } else {
+                clauses.append("(\(prefix)file_id IS NOT NULL AND \(prefix)file_id != '')")
+            }
+        }
+
         return SQLiteCandidateFilter(clauses: clauses, bindings: bindings)
     }
 
