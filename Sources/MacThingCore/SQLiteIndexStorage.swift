@@ -343,6 +343,7 @@ private final class SQLiteDatabase {
 
     func candidateEntries(hint: SearchCandidateHint, limit: Int) throws -> [FileEntry] {
         let safeLimit = max(1, min(limit, 20_000))
+        let needsSubstringFallback = needsSubstringFallback(for: hint.terms)
         var candidates: [FileEntry] = []
 
         if let ftsQuery = ftsMatchQuery(for: hint.terms) {
@@ -351,7 +352,7 @@ private final class SQLiteDatabase {
                 hint: hint,
                 limit: safeLimit
             ))
-            if candidates.count >= min(safeLimit, 1_000) {
+            if !needsSubstringFallback && candidates.count >= min(safeLimit, 1_000) {
                 return uniqueEntries(candidates)
             }
         }
@@ -770,6 +771,14 @@ private final class SQLiteDatabase {
             return nil
         }
         return values.map(ftsPhrase).joined(separator: " AND ")
+    }
+
+    private func needsSubstringFallback(for terms: [String]) -> Bool {
+        terms.contains { term in
+            term.unicodeScalars.contains { scalar in
+                !CharacterSet.alphanumerics.contains(scalar)
+            }
+        }
     }
 
     private func ftsPhrase(_ value: String) -> String {

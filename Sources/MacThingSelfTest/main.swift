@@ -4937,6 +4937,41 @@ do {
         "SQLite candidate search should preserve partial parent-path matches"
     )
 
+    let broadPathFTSDecoys = (0..<25).map { index in
+        FileEntry(
+            path: "/Users/me/Projects/DocLateNoise\(index)/Needle Overflow \(index).txt",
+            name: "Needle Overflow \(index).txt",
+            parent: "/Users/me/Projects/DocLateNoise\(index)",
+            kind: .file,
+            byteSize: 100 + Int64(index),
+            modifiedAt: Date(timeIntervalSince1970: 3_000 + TimeInterval(index)),
+            indexedAt: Date(timeIntervalSince1970: 3_000 + TimeInterval(index))
+        )
+    }
+    let lateSubstringTarget = FileEntry(
+        path: "/Users/me/DocLateFolder/Needle Keeper.md",
+        name: "Needle Keeper.md",
+        parent: "/Users/me/DocLateFolder",
+        kind: .file,
+        byteSize: 1_024,
+        modifiedAt: Date(timeIntervalSince1970: 4_000),
+        indexedAt: Date(timeIntervalSince1970: 4_000)
+    )
+    try IndexStorage.upsert(entries: broadPathFTSDecoys, rootPath: temporaryDirectory.path, to: databaseURL)
+    try IndexStorage.upsert(entries: [lateSubstringTarget], rootPath: temporaryDirectory.path, to: databaseURL)
+    let lateSubstringHint = SearchEngine.candidateHint(
+        for: SearchRequest(query: "needle parent-path:/Users/me/DocLate")
+    )
+    let lateSubstringCandidates = try IndexStorage.candidateEntries(
+        hint: lateSubstringHint,
+        limit: 20,
+        from: databaseURL
+    )
+    expect(
+        lateSubstringCandidates.contains { $0.path == lateSubstringTarget.path },
+        "SQLite candidate search should continue to substring fallback when broad FTS fills the window"
+    )
+
     let hiddenHint = SearchEngine.candidateHint(for: SearchRequest(query: "secret hidden:"))
     let hiddenCandidates = try IndexStorage.candidateEntries(hint: hiddenHint, limit: 20, from: databaseURL)
     expect(
