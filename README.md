@@ -92,7 +92,8 @@ The current packaged release is available from GitHub:
   (`frn:`) filters, root-entry (`root:`) filters, file-list provenance
   (`filelistfilename:`) filters, exact file-list value filters, exact
   existence filters, exact path-list filters, empty-entry (`empty:`) filters,
-  exact direct-parent filters, direct-child count, child attr/date/run-count/size,
+  known shell-folder path filters, exact direct-parent filters, direct-child count,
+  child attr/date/run-count/size,
   ancestor attribute filters, ancestor-child presence/exact filters, child
   presence/exact filters, exact child file-list filters, descendant
   presence/exact filters, descendant count filters, parent-child,

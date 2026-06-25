@@ -4047,8 +4047,15 @@ expect(
 
 let shellHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch shell:desktop"))
 expect(
-    shellHint.canUseDatabaseCandidates == false,
-    "shell: searches should avoid lossy SQLite candidate prefiltering"
+    shellHint.canUseDatabaseCandidates &&
+        shellHint.terms.contains(selfTestDesktopPath),
+    "known shell: searches should add the resolved folder path to SQLite candidate terms"
+)
+
+let unknownShellHint = SearchEngine.candidateHint(for: SearchRequest(query: "shell:not-a-real-folder"))
+expect(
+    unknownShellHint.canUseDatabaseCandidates == false,
+    "unknown shell: searches should avoid unnecessary SQLite candidate prefiltering"
 )
 
 let imageMetadataHint = SearchEngine.candidateHint(for: SearchRequest(query: "width:2"))
@@ -5700,6 +5707,35 @@ do {
     expect(
         Set(partialParentPathLaunchCandidates.map(\.path)) == Set([document.path, folder.path]),
         "SQLite candidate search should preserve partial parent-path matches"
+    )
+
+    let shellCandidateDatabaseURL = temporaryDirectory.appending(path: "ShellCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(
+            rootPath: selfTestHomePath,
+            entries: [shellDesktopFolder, shellDesktopFile, shellNestedDesktopFile, shellDocumentFile]
+        ),
+        to: shellCandidateDatabaseURL
+    )
+    let shellDesktopCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "shell:desktop")),
+        limit: 20,
+        from: shellCandidateDatabaseURL
+    )
+    expect(
+        Set(shellDesktopCandidates.map(\.path)) ==
+            Set([shellDesktopFolder.path, shellDesktopFile.path, shellNestedDesktopFile.path]),
+        "SQLite candidate search should use known shell folder paths"
+    )
+
+    let shellDesktopLaunchCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "launch shell:desktop")),
+        limit: 20,
+        from: shellCandidateDatabaseURL
+    )
+    expect(
+        Set(shellDesktopLaunchCandidates.map(\.path)) == Set([shellDesktopFile.path, shellNestedDesktopFile.path]),
+        "SQLite candidate search should combine shell folder paths with text terms"
     )
 
     let parentMetadataCandidateDatabaseURL = temporaryDirectory.appending(path: "ParentMetadataCandidates.db")

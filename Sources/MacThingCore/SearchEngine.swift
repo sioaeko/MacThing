@@ -2201,6 +2201,11 @@ public enum SearchEngine {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
                     rootOnly = true
+                case "shell":
+                    guard let path = knownShellFolderPath(value) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    addTerm(path)
                 case "empty":
                     if isExplicitFalseBoolean(value) {
                         requiresNonEmptyEntry = true
@@ -2317,8 +2322,7 @@ public enum SearchEngine {
                      "fsi",
                      "width", "height", "bitdepth",
                      "dimension", "dimensions", "orientation", "aspect-ratio",
-                     "aspectratio",
-                     "shell":
+                     "aspectratio":
                     return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                 default:
                     continue
