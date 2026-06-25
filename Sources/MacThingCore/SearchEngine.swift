@@ -629,6 +629,16 @@ public struct SearchCandidateChildRunCountFilter: Sendable {
     }
 }
 
+public struct SearchCandidateChildDateFilter: Sendable {
+    public let allowedKinds: Set<FileKind>?
+    public let filters: [SearchCandidateDateFilter]
+
+    public init(allowedKinds: Set<FileKind>?, filters: [SearchCandidateDateFilter]) {
+        self.allowedKinds = allowedKinds
+        self.filters = filters
+    }
+}
+
 public struct SearchCandidateHint: Sendable {
     public let terms: [String]
     public let canUseDatabaseCandidates: Bool
@@ -643,6 +653,7 @@ public struct SearchCandidateHint: Sendable {
     public let mediaTextFilters: [SearchCandidateMediaTextFilter]
     public let childSizeFilters: [SearchCandidateChildSizeFilter]
     public let childRunCountFilters: [SearchCandidateChildRunCountFilter]
+    public let childDateFilters: [SearchCandidateChildDateFilter]
     public let fileReferenceFilter: SearchCandidateFileReferenceFilter?
     public let requiresFileListSource: Bool
     public let rootOnly: Bool
@@ -664,6 +675,7 @@ public struct SearchCandidateHint: Sendable {
         mediaTextFilters: [SearchCandidateMediaTextFilter] = [],
         childSizeFilters: [SearchCandidateChildSizeFilter] = [],
         childRunCountFilters: [SearchCandidateChildRunCountFilter] = [],
+        childDateFilters: [SearchCandidateChildDateFilter] = [],
         fileReferenceFilter: SearchCandidateFileReferenceFilter? = nil,
         requiresFileListSource: Bool = false,
         rootOnly: Bool = false,
@@ -684,6 +696,7 @@ public struct SearchCandidateHint: Sendable {
         self.mediaTextFilters = mediaTextFilters
         self.childSizeFilters = childSizeFilters
         self.childRunCountFilters = childRunCountFilters
+        self.childDateFilters = childDateFilters
         self.fileReferenceFilter = fileReferenceFilter
         self.requiresFileListSource = requiresFileListSource
         self.rootOnly = rootOnly
@@ -704,6 +717,7 @@ public struct SearchCandidateHint: Sendable {
             !mediaTextFilters.isEmpty ||
             !childSizeFilters.isEmpty ||
             !childRunCountFilters.isEmpty ||
+            !childDateFilters.isEmpty ||
             fileReferenceFilter != nil ||
             requiresFileListSource ||
             rootOnly ||
@@ -898,6 +912,7 @@ public enum SearchEngine {
         var mediaTextFilters: [SearchCandidateMediaTextFilter] = []
         var childSizeFilters: [SearchCandidateChildSizeFilter] = []
         var childRunCountFilters: [SearchCandidateChildRunCountFilter] = []
+        var childDateFilters: [SearchCandidateChildDateFilter] = []
         var fileReferenceFilter: SearchCandidateFileReferenceFilter?
         var requiresFileListSource = false
         var rootOnly = false
@@ -1068,6 +1083,23 @@ public enum SearchEngine {
                 return false
             }
             dateFilters.append(contentsOf: filter.candidateFilters(field: field))
+            return true
+        }
+
+        func addChildDateCandidateHint(
+            value: String,
+            field: SearchCandidateDateField,
+            allowedKinds: Set<FileKind>?
+        ) -> Bool {
+            guard canonicalSearchFunctionName(value.trimmingCharacters(in: .whitespacesAndNewlines)) != "unknown",
+                  let filter = DateFilter.parse(value) else {
+                return false
+            }
+            let filters = filter.candidateFilters(field: field)
+            guard !filters.isEmpty else {
+                return false
+            }
+            childDateFilters.append(SearchCandidateChildDateFilter(allowedKinds: allowedKinds, filters: filters))
             return true
         }
 
@@ -1360,6 +1392,66 @@ public enum SearchEngine {
                             filters: filter.candidateFilters(field: .runCount)
                         )
                     )
+                case "childda", "childdateaccessed":
+                    guard addChildDateCandidateHint(value: value, field: .dateAccessed, allowedKinds: nil) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                case "childfileda", "childfiledateaccessed":
+                    guard addChildDateCandidateHint(value: value, field: .dateAccessed, allowedKinds: [.file, .symlink, .other]) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                case "childfolderda", "childfolderdateaccessed":
+                    guard addChildDateCandidateHint(value: value, field: .dateAccessed, allowedKinds: [.folder, .package]) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                case "childdc", "childdatecreated":
+                    guard addChildDateCandidateHint(value: value, field: .dateCreated, allowedKinds: nil) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                case "childfiledc", "childfiledatecreated":
+                    guard addChildDateCandidateHint(value: value, field: .dateCreated, allowedKinds: [.file, .symlink, .other]) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                case "childfolderdc", "childfolderdatecreated":
+                    guard addChildDateCandidateHint(value: value, field: .dateCreated, allowedKinds: [.folder, .package]) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                case "childdm", "childdatemodified":
+                    guard addChildDateCandidateHint(value: value, field: .dateModified, allowedKinds: nil) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                case "childfiledm", "childfiledatemodified":
+                    guard addChildDateCandidateHint(value: value, field: .dateModified, allowedKinds: [.file, .symlink, .other]) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                case "childfolderdm", "childfolderdatemodified":
+                    guard addChildDateCandidateHint(value: value, field: .dateModified, allowedKinds: [.folder, .package]) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                case "childrc", "childdaterecentlychanged":
+                    guard addChildDateCandidateHint(value: value, field: .dateIndexed, allowedKinds: nil) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                case "childfilerc", "childfiledaterecentlychanged":
+                    guard addChildDateCandidateHint(value: value, field: .dateIndexed, allowedKinds: [.file, .symlink, .other]) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                case "childfolderrc", "childfolderdaterecentlychanged":
+                    guard addChildDateCandidateHint(value: value, field: .dateIndexed, allowedKinds: [.folder, .package]) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                case "childdaterun":
+                    guard addChildDateCandidateHint(value: value, field: .dateRun, allowedKinds: nil) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                case "childfiledaterun":
+                    guard addChildDateCandidateHint(value: value, field: .dateRun, allowedKinds: [.file, .symlink, .other]) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                case "childfolderdaterun":
+                    guard addChildDateCandidateHint(value: value, field: .dateRun, allowedKinds: [.folder, .package]) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
                 case "track":
                     guard let filter = ComparisonFilter<Int64>.parse(value.isEmpty ? ">0" : value, valueParser: { Int64($0) }) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
@@ -1494,16 +1586,7 @@ public enum SearchEngine {
                      "childfileattr", "childfileattrib", "childfileattribute",
                      "childfileattributes", "childfolderattr", "childfolderattrib",
                      "childfolderattribute", "childfolderattributes",
-                     "childda", "childdateaccessed", "childfileda",
-                     "childfiledateaccessed", "childfolderda",
-                     "childfolderdateaccessed", "childdc", "childdatecreated",
-                     "childfiledc", "childfiledatecreated", "childfolderdc",
-                     "childfolderdatecreated", "childdm", "childdatemodified",
-                     "childfiledm", "childfiledatemodified", "childfolderdm",
-                     "childfolderdatemodified", "childrc", "childdaterecentlychanged",
-                     "childfilerc", "childfiledaterecentlychanged", "childfolderrc",
-                     "childfolderdaterecentlychanged", "childdaterun",
-                     "childfiledaterun", "childfolderdaterun", "childfilelist",
+                     "childfilelist",
                      "sibling", "siblingname", "siblingfile",
                      "siblingfiles", "siblingfolder", "siblingfolders",
                      "siblingdir", "siblingdirs", "namefrequency",
@@ -1552,6 +1635,7 @@ public enum SearchEngine {
             !mediaTextFilters.isEmpty ||
             !childSizeFilters.isEmpty ||
             !childRunCountFilters.isEmpty ||
+            !childDateFilters.isEmpty ||
             fileReferenceFilter != nil ||
             requiresFileListSource ||
             rootOnly ||
@@ -1572,6 +1656,7 @@ public enum SearchEngine {
             mediaTextFilters: mediaTextFilters,
             childSizeFilters: childSizeFilters,
             childRunCountFilters: childRunCountFilters,
+            childDateFilters: childDateFilters,
             fileReferenceFilter: fileReferenceFilter,
             requiresFileListSource: requiresFileListSource,
             rootOnly: rootOnly,

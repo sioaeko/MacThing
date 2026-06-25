@@ -3318,8 +3318,24 @@ expect(
 
 let childDateHint = SearchEngine.candidateHint(for: SearchRequest(query: "child-dm:>2024-01-01"))
 expect(
-    childDateHint.canUseDatabaseCandidates == false,
-    "child-dm: searches should avoid lossy SQLite candidate prefiltering"
+    childDateHint.canUseDatabaseCandidates &&
+        childDateHint.childDateFilters.count == 1,
+    "child-dm: searches should be pushed into SQLite candidate hints"
+)
+
+let childFileDateHint = SearchEngine.candidateHint(for: SearchRequest(query: "child-file-date-accessed:2024-05-03"))
+expect(
+    childFileDateHint.canUseDatabaseCandidates &&
+        childFileDateHint.childDateFilters.contains {
+            $0.allowedKinds == Set<FileKind>([.file, .symlink, .other])
+        },
+    "child-file date searches should be pushed into SQLite candidate hints"
+)
+
+let unknownChildDateHint = SearchEngine.candidateHint(for: SearchRequest(query: "child-dm:unknown"))
+expect(
+    unknownChildDateHint.canUseDatabaseCandidates == false,
+    "child unknown-date searches should avoid lossy SQLite candidate prefiltering"
 )
 
 let childRunCountHint = SearchEngine.candidateHint(for: SearchRequest(query: "child-run-count:>0"))
@@ -5543,6 +5559,46 @@ do {
     expect(
         childFolderRunCountCandidates.map(\.path) == [folder.path],
         "SQLite candidate search should apply child-folder-run-count filters"
+    )
+
+    let childModifiedDateCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "child-dm:2024-05-02")),
+        limit: 20,
+        from: childSizeCandidateDatabaseURL
+    )
+    expect(
+        childModifiedDateCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply child modified-date filters"
+    )
+
+    let childFileAccessedDateCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "child-file-date-accessed:2024-05-03")),
+        limit: 20,
+        from: childSizeCandidateDatabaseURL
+    )
+    expect(
+        childFileAccessedDateCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply child-file accessed-date filters"
+    )
+
+    let childFolderModifiedDateCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "child-folder-dm:2024-06-02")),
+        limit: 20,
+        from: childSizeCandidateDatabaseURL
+    )
+    expect(
+        childFolderModifiedDateCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply child-folder modified-date filters"
+    )
+
+    let childDateRunCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "child-date-run:2024-05-05")),
+        limit: 20,
+        from: childSizeCandidateDatabaseURL
+    )
+    expect(
+        childDateRunCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply child date-run filters"
     )
 
     let siblingCountCandidateDatabaseURL = temporaryDirectory.appending(path: "SiblingCountCandidates.db")

@@ -735,6 +735,16 @@ private final class SQLiteDatabase {
             bindings.append(contentsOf: childFilter.bindings)
         }
 
+        for filter in hint.childDateFilters {
+            let childFilter = childDateFilterClause(
+                prefix: prefix,
+                tablePrefix: tablePrefix,
+                filter: filter
+            )
+            clauses.append(childFilter.clause)
+            bindings.append(contentsOf: childFilter.bindings)
+        }
+
         if let filter = hint.fileReferenceFilter {
             if let fileID = filter.fileID, !fileID.isEmpty {
                 clauses.append("LOWER(\(prefix)file_id) = ?")
@@ -928,6 +938,40 @@ private final class SQLiteDatabase {
         for numericFilter in filter.filters {
             childClauses.append("child.run_count \(sqlOperator(for: numericFilter.op)) ?")
             bindings.append(.int(numericFilter.value))
+        }
+
+        let clause = """
+            (
+                \(prefix)kind IN ('folder', 'package')
+                AND EXISTS (
+                    SELECT 1
+                    FROM entries AS child
+                    WHERE \(childClauses.joined(separator: " AND "))
+                    LIMIT 1
+                )
+            )
+            """
+        return (clause, bindings)
+    }
+
+    private func childDateFilterClause(
+        prefix: String,
+        tablePrefix: String?,
+        filter: SearchCandidateChildDateFilter
+    ) -> (clause: String, bindings: [SQLiteValue]) {
+        let pathExpression = outerPathExpression(tablePrefix: tablePrefix)
+        var childClauses = ["child.parent = \(pathExpression)"]
+        var bindings: [SQLiteValue] = []
+
+        if let allowedKinds = filter.allowedKinds {
+            let kinds = allowedKinds.map(\.rawValue).sorted()
+            childClauses.append("child.kind IN (\(placeholders(count: kinds.count)))")
+            bindings.append(contentsOf: kinds.map(SQLiteValue.text))
+        }
+
+        for dateFilter in filter.filters {
+            childClauses.append("child.\(column(for: dateFilter.field)) \(sqlOperator(for: dateFilter.op)) ?")
+            bindings.append(.date(dateFilter.value))
         }
 
         let clause = """
