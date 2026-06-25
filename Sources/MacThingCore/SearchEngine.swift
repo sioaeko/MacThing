@@ -540,6 +540,9 @@ public enum SearchCandidateNumericField: String, Sendable {
     case pathUTF8Length
     case pathPartLength
     case extensionLength
+    case childCount
+    case childFileCount
+    case childFolderCount
 }
 
 public enum SearchCandidateDateField: String, Hashable, Sendable {
@@ -1234,6 +1237,21 @@ public enum SearchEngine {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
                     numericFilters.append(contentsOf: filter.candidateFilters(field: .extensionLength))
+                case "childcount", "children":
+                    guard let filter = ComparisonFilter<Int>.parse(value, valueParser: { Int($0) }) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .childCount))
+                case "childfilecount", "childfiles":
+                    guard let filter = ComparisonFilter<Int>.parse(value, valueParser: { Int($0) }) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .childFileCount))
+                case "childfoldercount", "childfolders":
+                    guard let filter = ComparisonFilter<Int>.parse(value, valueParser: { Int($0) }) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .childFolderCount))
                 case "track":
                     guard let filter = ComparisonFilter<Int64>.parse(value.isEmpty ? ">0" : value, valueParser: { Int64($0) }) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
@@ -1360,9 +1378,8 @@ public enum SearchEngine {
                 case "content", "ansicontent", "utf8content", "utf16content", "utf16becontent",
                      "regex", "dupe", "dupename", "nothing",
                      "exists", "fileexists", "folderexists",
-                     "child", "childname", "childcount", "children",
-                     "childfilecount", "childfiles", "childfoldercount",
-                     "childfolders", "childfile", "childfilename", "childfilenames",
+                     "child", "childname",
+                     "childfile", "childfilename", "childfilenames",
                      "childfolder", "childfoldername", "childfoldernames",
                      "childdir", "childdirname", "childdirs", "childdirnames",
                      "childattr", "childattrib", "childattribute", "childattributes",
@@ -7196,6 +7213,17 @@ private struct ComparisonFilter<Value: Comparable> {
                 field: field,
                 op: candidateOperator,
                 value: value
+            )
+        }
+    }
+
+    func candidateFilters(field: SearchCandidateNumericField) -> [SearchCandidateNumericFilter] where Value == Int {
+        comparisons().map { op, value in
+            let candidateOperator = op.candidateOperator
+            return SearchCandidateNumericFilter(
+                field: field,
+                op: candidateOperator,
+                value: Int64(value)
             )
         }
     }

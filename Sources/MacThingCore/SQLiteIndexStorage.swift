@@ -676,7 +676,7 @@ private final class SQLiteDatabase {
         }
 
         for filter in hint.numericFilters {
-            clauses.append("\(numericExpression(for: filter.field, prefix: prefix)) \(sqlOperator(for: filter.op)) ?")
+            clauses.append("\(numericExpression(for: filter.field, prefix: prefix, tablePrefix: tablePrefix)) \(sqlOperator(for: filter.op)) ?")
             bindings.append(.int(filter.value))
         }
 
@@ -767,7 +767,7 @@ private final class SQLiteDatabase {
         Array(repeating: "?", count: count).joined(separator: ", ")
     }
 
-    private func numericExpression(for field: SearchCandidateNumericField, prefix: String) -> String {
+    private func numericExpression(for field: SearchCandidateNumericField, prefix: String, tablePrefix: String?) -> String {
         switch field {
         case .byteSize:
             return "\(prefix)byte_size"
@@ -802,7 +802,30 @@ private final class SQLiteDatabase {
             return "\(prefix)path_part_length"
         case .extensionLength:
             return "\(prefix)extension_length"
+        case .childCount:
+            return childCountExpression(prefix: prefix, tablePrefix: tablePrefix, allowedKinds: nil)
+        case .childFileCount:
+            return childCountExpression(prefix: prefix, tablePrefix: tablePrefix, allowedKinds: [.file, .symlink, .other])
+        case .childFolderCount:
+            return childCountExpression(prefix: prefix, tablePrefix: tablePrefix, allowedKinds: [.folder, .package])
         }
+    }
+
+    private func childCountExpression(prefix: String, tablePrefix: String?, allowedKinds: [FileKind]?) -> String {
+        let pathExpression = outerPathExpression(tablePrefix: tablePrefix)
+        var whereClause = "child.parent = \(pathExpression)"
+        if let allowedKinds {
+            let kinds = allowedKinds.map(\.rawValue).sorted()
+            let quotedKinds = kinds.map { "'\(escapeSQLLiteral($0))'" }.joined(separator: ", ")
+            whereClause += " AND child.kind IN (\(quotedKinds))"
+        }
+        return """
+            (CASE
+                WHEN \(prefix)kind IN ('folder', 'package') THEN
+                    (SELECT COUNT(1) FROM entries AS child WHERE \(whereClause))
+                ELSE NULL
+            END)
+            """
     }
 
     private func column(for field: SearchCandidateMediaTextField) -> String {
@@ -976,6 +999,10 @@ private final class SQLiteDatabase {
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "%", with: "\\%")
             .replacingOccurrences(of: "_", with: "\\_")
+    }
+
+    private func escapeSQLLiteral(_ value: String) -> String {
+        value.replacingOccurrences(of: "'", with: "''")
     }
 
     private func ftsMatchQuery(for terms: [String]) -> String? {

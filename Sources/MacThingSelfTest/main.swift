@@ -3251,16 +3251,32 @@ expect(
     "child-file: searches should avoid lossy SQLite candidate prefiltering"
 )
 
+let childCountHint = SearchEngine.candidateHint(for: SearchRequest(query: "childcount:>0"))
+expect(
+    childCountHint.canUseDatabaseCandidates &&
+        childCountHint.numericFilters.first?.field == .childCount,
+    "childcount: searches should be pushed into SQLite candidate hints"
+)
+
 let childFileCountHint = SearchEngine.candidateHint(for: SearchRequest(query: "childfilecount:>0"))
 expect(
-    childFileCountHint.canUseDatabaseCandidates == false,
-    "childfilecount: searches should avoid lossy SQLite candidate prefiltering"
+    childFileCountHint.canUseDatabaseCandidates &&
+        childFileCountHint.numericFilters.first?.field == .childFileCount,
+    "childfilecount: searches should be pushed into SQLite candidate hints"
 )
 
 let dashedChildFileCountHint = SearchEngine.candidateHint(for: SearchRequest(query: "child-file-count:>0"))
 expect(
-    dashedChildFileCountHint.canUseDatabaseCandidates == false,
-    "dashed child-file-count: searches should avoid lossy SQLite candidate prefiltering"
+    dashedChildFileCountHint.canUseDatabaseCandidates &&
+        dashedChildFileCountHint.numericFilters.first?.field == .childFileCount,
+    "dashed child-file-count: searches should be pushed into SQLite candidate hints"
+)
+
+let childFolderCountHint = SearchEngine.candidateHint(for: SearchRequest(query: "childfoldercount:>0"))
+expect(
+    childFolderCountHint.canUseDatabaseCandidates &&
+        childFolderCountHint.numericFilters.first?.field == .childFolderCount,
+    "childfoldercount: searches should be pushed into SQLite candidate hints"
 )
 
 let totalChildSizeHint = SearchEngine.candidateHint(for: SearchRequest(query: "total-child-size:>1kb"))
@@ -5313,6 +5329,51 @@ do {
     expect(
         Set(extensionLengthCandidates.map(\.path)) == Set([photo.path, utf8NameEntry.path, emojiNameEntry.path]),
         "SQLite candidate search should apply extension-length filters"
+    )
+
+    let childCountCandidateDatabaseURL = temporaryDirectory.appending(path: "ChildCountCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: "/Users/me", entries: [document, folder, childInFolder, childFolderInFolder, nestedGrandchild]),
+        to: childCountCandidateDatabaseURL
+    )
+    let childCountCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "childcount:>0")),
+        limit: 20,
+        from: childCountCandidateDatabaseURL
+    )
+    expect(
+        Set(childCountCandidates.map(\.path)) == Set([folder.path, childFolderInFolder.path]),
+        "SQLite candidate search should apply child-count filters"
+    )
+
+    let zeroChildCountCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "childcount:0")),
+        limit: 20,
+        from: childCountCandidateDatabaseURL
+    )
+    expect(
+        zeroChildCountCandidates.isEmpty,
+        "SQLite child-count filters should not treat non-containers as zero-child containers"
+    )
+
+    let childFileCountCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "childfilecount:1")),
+        limit: 20,
+        from: childCountCandidateDatabaseURL
+    )
+    expect(
+        Set(childFileCountCandidates.map(\.path)) == Set([folder.path, childFolderInFolder.path]),
+        "SQLite candidate search should apply child-file-count filters"
+    )
+
+    let childFolderCountCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "childfoldercount:1")),
+        limit: 20,
+        from: childCountCandidateDatabaseURL
+    )
+    expect(
+        childFolderCountCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply child-folder-count filters"
     )
 
     let broadPathFTSDecoys = (0..<25).map { index in
