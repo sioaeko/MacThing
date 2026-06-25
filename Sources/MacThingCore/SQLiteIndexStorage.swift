@@ -820,6 +820,16 @@ private final class SQLiteDatabase {
             bindings.append(contentsOf: childFilter.bindings)
         }
 
+        for filter in hint.descendantTextFilters {
+            let descendantFilter = descendantTextFilterClause(
+                prefix: prefix,
+                tablePrefix: tablePrefix,
+                filter: filter
+            )
+            clauses.append(descendantFilter.clause)
+            bindings.append(contentsOf: descendantFilter.bindings)
+        }
+
         if let filter = hint.fileReferenceFilter {
             if let fileID = filter.fileID, !fileID.isEmpty {
                 clauses.append("LOWER(\(prefix)file_id) = ?")
@@ -1317,6 +1327,62 @@ private final class SQLiteDatabase {
                     SELECT 1
                     FROM entries AS child
                     WHERE \(childClauses.joined(separator: " AND "))
+                    LIMIT 1
+                )
+            )
+            """
+        return (clause, bindings)
+    }
+
+    private func descendantTextFilterClause(
+        prefix: String,
+        tablePrefix: String?,
+        filter: SearchCandidateDescendantTextFilter
+    ) -> (clause: String, bindings: [SQLiteValue]) {
+        let pathExpression = outerPathExpression(tablePrefix: tablePrefix)
+        var descendantClauses: [String] = []
+        var bindings: [SQLiteValue] = []
+
+        if let allowedKinds = filter.allowedKinds {
+            let kinds = allowedKinds.map(\.rawValue).sorted()
+            descendantClauses.append("descendant_kind IN (\(placeholders(count: kinds.count)))")
+            bindings.append(contentsOf: kinds.map(SQLiteValue.text))
+        }
+
+        if let value = filter.value, !value.isEmpty {
+            var matchClauses = ["instr(descendant_name, ?) > 0"]
+            bindings.append(.text(value))
+
+            if filter.searchesPath {
+                matchClauses.append("instr(descendant_path, ?) > 0")
+                bindings.append(.text(value))
+            }
+
+            descendantClauses.append("(\(matchClauses.joined(separator: " OR ")))")
+        }
+
+        let descendantWhere = descendantClauses.isEmpty
+            ? ""
+            : "WHERE \(descendantClauses.joined(separator: " AND "))"
+
+        let clause = """
+            (
+                \(prefix)kind IN ('folder', 'package')
+                AND EXISTS (
+                    WITH RECURSIVE descendant_tree(descendant_path, descendant_kind, descendant_name) AS (
+                        SELECT child.path, child.kind, child.name
+                        FROM entries AS child
+                        WHERE child.parent = \(pathExpression)
+                        UNION
+                        SELECT nested.path, nested.kind, nested.name
+                        FROM entries AS nested
+                        JOIN descendant_tree
+                            ON nested.parent = descendant_tree.descendant_path
+                        WHERE descendant_tree.descendant_kind IN ('folder', 'package')
+                    )
+                    SELECT 1
+                    FROM descendant_tree
+                    \(descendantWhere)
                     LIMIT 1
                 )
             )
