@@ -696,6 +696,15 @@ private final class SQLiteDatabase {
             bindings.append(contentsOf: filter.bindings)
         }
 
+        for filter in hint.existsFilters {
+            let existsFilter = existsFilterClause(
+                tablePrefix: tablePrefix,
+                filter: filter
+            )
+            clauses.append(existsFilter.clause)
+            bindings.append(contentsOf: existsFilter.bindings)
+        }
+
         for filter in hint.dateFilters {
             clauses.append("\(prefix)\(column(for: filter.field)) \(sqlOperator(for: filter.op)) ?")
             bindings.append(.date(filter.value))
@@ -906,6 +915,52 @@ private final class SQLiteDatabase {
             )
             """
         let bindings = (fileKinds + containerKinds).map(SQLiteValue.text)
+        return (clause, bindings)
+    }
+
+    private func existsFilterClause(
+        tablePrefix: String?,
+        filter: SearchCandidateExistsFilter
+    ) -> (clause: String, bindings: [SQLiteValue]) {
+        var targetClauses: [String] = []
+        var bindings: [SQLiteValue] = []
+
+        if let pathValue = filter.pathValue {
+            targetClauses.append("target.path = ?")
+            bindings.append(.text(pathValue))
+        } else if let relativeName = filter.relativeName {
+            let parentExpression = outerParentExpression(tablePrefix: tablePrefix)
+            targetClauses.append(
+                """
+                target.path = (
+                    CASE
+                        WHEN \(parentExpression) = '' OR \(parentExpression) = '/'
+                            THEN '/' || ?
+                        ELSE \(parentExpression) || '/' || ?
+                    END
+                )
+                """
+            )
+            bindings.append(.text(relativeName))
+            bindings.append(.text(relativeName))
+        } else {
+            return ("1 = 1", [])
+        }
+
+        if let allowedKinds = filter.allowedKinds {
+            let kinds = allowedKinds.map(\.rawValue).sorted()
+            targetClauses.append("target.kind IN (\(placeholders(count: kinds.count)))")
+            bindings.append(contentsOf: kinds.map(SQLiteValue.text))
+        }
+
+        let clause = """
+            EXISTS (
+                SELECT 1
+                FROM entries AS target
+                WHERE \(targetClauses.joined(separator: " AND "))
+                LIMIT 1
+            )
+            """
         return (clause, bindings)
     }
 

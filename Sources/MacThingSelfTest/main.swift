@@ -3832,6 +3832,33 @@ expect(
     "file-exists: searches should avoid lossy SQLite candidate prefiltering"
 )
 
+let exactFileExistsHint = SearchEngine.candidateHint(for: SearchRequest(query: "file-exists:Track.jpg"))
+expect(
+    exactFileExistsHint.canUseDatabaseCandidates &&
+        exactFileExistsHint.existsFilters.first?.relativeName == "Track.jpg",
+    "exact file-exists: searches should be pushed into SQLite candidate hints"
+)
+
+let absoluteExistsHint = SearchEngine.candidateHint(for: SearchRequest(query: "exists:/Users/me/Music/Track.jpg"))
+expect(
+    absoluteExistsHint.canUseDatabaseCandidates &&
+        absoluteExistsHint.existsFilters.first?.pathValue == "/Users/me/Music/Track.jpg",
+    "absolute exists: searches should be pushed into SQLite candidate hints"
+)
+
+let folderExistsHint = SearchEngine.candidateHint(for: SearchRequest(query: "folder-exists:Archive"))
+expect(
+    folderExistsHint.canUseDatabaseCandidates &&
+        folderExistsHint.existsFilters.first?.allowedKinds == Set<FileKind>([.folder, .package]),
+    "exact folder-exists: searches should preserve kind filters in SQLite candidate hints"
+)
+
+let wildcardFileExistsHint = SearchEngine.candidateHint(for: SearchRequest(query: "file-exists:*.jpg"))
+expect(
+    wildcardFileExistsHint.canUseDatabaseCandidates == false,
+    "wildcard file-exists: searches should avoid lossy SQLite candidate prefiltering"
+)
+
 let pathListHint = SearchEngine.candidateHint(for: SearchRequest(query: "path-list:/Users/me/Pictures/Launch.JPG"))
 expect(
     pathListHint.canUseDatabaseCandidates == false,
@@ -5650,6 +5677,62 @@ do {
     expect(
         Set(parentCountCandidates.map(\.path)) == Set([childInFolder.path, nestedGrandchild.path]),
         "SQLite candidate search should apply parent-count depth aliases"
+    )
+
+    let existsCandidateDatabaseURL = temporaryDirectory.appending(path: "ExistsCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: "/Users/me", entries: [sidecarAudio, sidecarImage, matchingFolderFile, matchingFolder]),
+        to: existsCandidateDatabaseURL
+    )
+    let exactFileExistsCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "file-exists:Track.jpg")),
+        limit: 20,
+        from: existsCandidateDatabaseURL
+    )
+    expect(
+        Set(exactFileExistsCandidates.map(\.path)) == Set([sidecarAudio.path, sidecarImage.path]),
+        "SQLite candidate search should apply exact relative file-exists filters"
+    )
+
+    let combinedFileExistsCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "ext:mp3 file-exists:Track.jpg")),
+        limit: 20,
+        from: existsCandidateDatabaseURL
+    )
+    expect(
+        combinedFileExistsCandidates.map(\.path) == [sidecarAudio.path],
+        "SQLite candidate search should combine extension and file-exists filters"
+    )
+
+    let absoluteExistsCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "exists:/Users/me/Music/Track.jpg")),
+        limit: 20,
+        from: existsCandidateDatabaseURL
+    )
+    expect(
+        Set(absoluteExistsCandidates.map(\.path)) ==
+            Set([sidecarAudio.path, sidecarImage.path, matchingFolderFile.path, matchingFolder.path]),
+        "SQLite candidate search should apply absolute exists filters"
+    )
+
+    let missingAbsoluteExistsCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "exists:/Users/me/Music/Missing.jpg")),
+        limit: 20,
+        from: existsCandidateDatabaseURL
+    )
+    expect(
+        missingAbsoluteExistsCandidates.isEmpty,
+        "SQLite candidate search should reject missing absolute exists filters"
+    )
+
+    let folderExistsCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "folder-exists:Archive")),
+        limit: 20,
+        from: existsCandidateDatabaseURL
+    )
+    expect(
+        Set(folderExistsCandidates.map(\.path)) == Set([matchingFolderFile.path, matchingFolder.path]),
+        "SQLite candidate search should apply exact folder-exists filters"
     )
 
     let siblingRelationCandidateDatabaseURL = temporaryDirectory.appending(path: "SiblingRelationCandidates.db")
