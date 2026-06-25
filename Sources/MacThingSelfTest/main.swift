@@ -3419,6 +3419,31 @@ expect(
     "ancestor-child-file: searches should avoid lossy SQLite candidate prefiltering"
 )
 
+let ancestorChildPresenceHint = SearchEngine.candidateHint(for: SearchRequest(query: "ancestor-child:"))
+expect(
+    ancestorChildPresenceHint.canUseDatabaseCandidates &&
+        ancestorChildPresenceHint.ancestorChildFilters.first?.value == nil,
+    "ancestor-child: presence searches should be pushed into SQLite candidate hints"
+)
+
+let exactAncestorChildHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "ancestor-child:Child", options: exactParentChildOptions)
+)
+expect(
+    exactAncestorChildHint.canUseDatabaseCandidates &&
+        exactAncestorChildHint.ancestorChildFilters.first?.value == "Child",
+    "exact ancestor-child: searches should be pushed into SQLite candidate hints"
+)
+
+let exactAncestorChildFolderHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "ancestor-child-folder:Nested", options: exactParentChildOptions)
+)
+expect(
+    exactAncestorChildFolderHint.canUseDatabaseCandidates &&
+        exactAncestorChildFolderHint.ancestorChildFilters.first?.allowedKinds == Set<FileKind>([.folder, .package]),
+    "exact ancestor-child-folder: searches should preserve kind filters in SQLite candidate hints"
+)
+
 let childAttributeHint = SearchEngine.candidateHint(for: SearchRequest(query: "child-file-attr:h"))
 expect(
     childAttributeHint.canUseDatabaseCandidates &&
@@ -5767,6 +5792,56 @@ do {
     expect(
         exactDescendantFolderCandidates.map(\.path) == [folder.path],
         "SQLite candidate search should apply exact descendant-folder filters"
+    )
+
+    let ancestorChildPresenceCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "ancestor-child:")),
+        limit: 20,
+        from: childCountCandidateDatabaseURL
+    )
+    expect(
+        Set(ancestorChildPresenceCandidates.map(\.path)) ==
+            Set([document.path, folder.path, childInFolder.path, childFolderInFolder.path, nestedGrandchild.path]),
+        "SQLite candidate search should apply ancestor-child presence filters"
+    )
+
+    let exactAncestorChildCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "ancestor-child:Child", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: childCountCandidateDatabaseURL
+    )
+    expect(
+        Set(exactAncestorChildCandidates.map(\.path)) ==
+            Set([childInFolder.path, childFolderInFolder.path, nestedGrandchild.path]),
+        "SQLite candidate search should apply exact ancestor-child text filters"
+    )
+
+    let exactAncestorChildFileCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "ancestor-child-file:Child", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: childCountCandidateDatabaseURL
+    )
+    expect(
+        Set(exactAncestorChildFileCandidates.map(\.path)) ==
+            Set([childInFolder.path, childFolderInFolder.path, nestedGrandchild.path]),
+        "SQLite candidate search should apply exact ancestor-child-file filters"
+    )
+
+    let exactAncestorChildFolderCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "ancestor-child-folder:Nested", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: childCountCandidateDatabaseURL
+    )
+    expect(
+        Set(exactAncestorChildFolderCandidates.map(\.path)) ==
+            Set([childInFolder.path, childFolderInFolder.path, nestedGrandchild.path]),
+        "SQLite candidate search should apply exact ancestor-child-folder filters"
     )
 
     let descendantCountCandidates = try IndexStorage.candidateEntries(

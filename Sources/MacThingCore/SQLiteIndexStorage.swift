@@ -830,6 +830,15 @@ private final class SQLiteDatabase {
             bindings.append(contentsOf: descendantFilter.bindings)
         }
 
+        for filter in hint.ancestorChildFilters {
+            let ancestorChildFilter = ancestorChildFilterClause(
+                tablePrefix: tablePrefix,
+                filter: filter
+            )
+            clauses.append(ancestorChildFilter.clause)
+            bindings.append(contentsOf: ancestorChildFilter.bindings)
+        }
+
         if let filter = hint.fileReferenceFilter {
             if let fileID = filter.fileID, !fileID.isEmpty {
                 clauses.append("LOWER(\(prefix)file_id) = ?")
@@ -1385,6 +1394,52 @@ private final class SQLiteDatabase {
                     \(descendantWhere)
                     LIMIT 1
                 )
+            )
+            """
+        return (clause, bindings)
+    }
+
+    private func ancestorChildFilterClause(
+        tablePrefix: String?,
+        filter: SearchCandidateAncestorChildFilter
+    ) -> (clause: String, bindings: [SQLiteValue]) {
+        let parentExpression = outerParentExpression(tablePrefix: tablePrefix)
+        var childClauses = [
+            "child.parent != ''",
+            """
+            (
+                child.parent = \(parentExpression)
+                OR (child.parent = '/' AND \(parentExpression) LIKE '/%')
+                OR (child.parent != '/' AND \(parentExpression) LIKE child.parent || '/%')
+            )
+            """
+        ]
+        var bindings: [SQLiteValue] = []
+
+        if let allowedKinds = filter.allowedKinds {
+            let kinds = allowedKinds.map(\.rawValue).sorted()
+            childClauses.append("child.kind IN (\(placeholders(count: kinds.count)))")
+            bindings.append(contentsOf: kinds.map(SQLiteValue.text))
+        }
+
+        if let value = filter.value, !value.isEmpty {
+            var matchClauses = ["instr(child.name, ?) > 0"]
+            bindings.append(.text(value))
+
+            if filter.searchesPath {
+                matchClauses.append("instr(child.path, ?) > 0")
+                bindings.append(.text(value))
+            }
+
+            childClauses.append("(\(matchClauses.joined(separator: " OR ")))")
+        }
+
+        let clause = """
+            EXISTS (
+                SELECT 1
+                FROM entries AS child
+                WHERE \(childClauses.joined(separator: " AND "))
+                LIMIT 1
             )
             """
         return (clause, bindings)
