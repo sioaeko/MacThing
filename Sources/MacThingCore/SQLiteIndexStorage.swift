@@ -765,6 +765,24 @@ private final class SQLiteDatabase {
             bindings.append(contentsOf: childFilter.bindings)
         }
 
+        for filter in hint.parentDateFilters {
+            let parentFilter = parentDateFilterClause(
+                tablePrefix: tablePrefix,
+                filter: filter
+            )
+            clauses.append(parentFilter.clause)
+            bindings.append(contentsOf: parentFilter.bindings)
+        }
+
+        for filter in hint.parentSizeFilters {
+            let parentFilter = parentSizeFilterClause(
+                tablePrefix: tablePrefix,
+                filter: filter
+            )
+            clauses.append(parentFilter.clause)
+            bindings.append(contentsOf: parentFilter.bindings)
+        }
+
         if let filter = hint.fileReferenceFilter {
             if let fileID = filter.fileID, !fileID.isEmpty {
                 clauses.append("LOWER(\(prefix)file_id) = ?")
@@ -1086,6 +1104,65 @@ private final class SQLiteDatabase {
                     WHERE \(childClauses.joined(separator: " AND "))
                     LIMIT 1
                 )
+            )
+            """
+        return (clause, bindings)
+    }
+
+    private func parentDateFilterClause(
+        tablePrefix: String?,
+        filter: SearchCandidateParentDateFilter
+    ) -> (clause: String, bindings: [SQLiteValue]) {
+        let parentExpression = outerParentExpression(tablePrefix: tablePrefix)
+        var parentClauses = ["parent_entry.path = \(parentExpression)"]
+        var bindings: [SQLiteValue] = []
+
+        for dateFilter in filter.filters {
+            parentClauses.append("parent_entry.\(column(for: dateFilter.field)) \(sqlOperator(for: dateFilter.op)) ?")
+            bindings.append(.date(dateFilter.value))
+        }
+
+        guard !bindings.isEmpty else {
+            return ("0", [])
+        }
+
+        let clause = """
+            EXISTS (
+                SELECT 1
+                FROM entries AS parent_entry
+                WHERE \(parentClauses.joined(separator: " AND "))
+                LIMIT 1
+            )
+            """
+        return (clause, bindings)
+    }
+
+    private func parentSizeFilterClause(
+        tablePrefix: String?,
+        filter: SearchCandidateParentSizeFilter
+    ) -> (clause: String, bindings: [SQLiteValue]) {
+        let parentExpression = outerParentExpression(tablePrefix: tablePrefix)
+        var parentClauses = [
+            "parent_entry.path = \(parentExpression)",
+            "parent_entry.byte_size IS NOT NULL"
+        ]
+        var bindings: [SQLiteValue] = []
+
+        for numericFilter in filter.filters {
+            parentClauses.append("parent_entry.byte_size \(sqlOperator(for: numericFilter.op)) ?")
+            bindings.append(.int(numericFilter.value))
+        }
+
+        guard !bindings.isEmpty else {
+            return ("0", [])
+        }
+
+        let clause = """
+            EXISTS (
+                SELECT 1
+                FROM entries AS parent_entry
+                WHERE \(parentClauses.joined(separator: " AND "))
+                LIMIT 1
             )
             """
         return (clause, bindings)

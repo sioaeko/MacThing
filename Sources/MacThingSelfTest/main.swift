@@ -3166,14 +3166,24 @@ expect(
 
 let parentDateHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch parent-dm:>2024-01-01"))
 expect(
-    parentDateHint.canUseDatabaseCandidates == false,
-    "parent-dm: searches should avoid lossy SQLite candidate prefiltering"
+    parentDateHint.canUseDatabaseCandidates &&
+        parentDateHint.terms == ["launch"] &&
+        parentDateHint.parentDateFilters.count == 1,
+    "parent-dm: searches should be pushed into SQLite candidate hints"
+)
+
+let unknownParentDateHint = SearchEngine.candidateHint(for: SearchRequest(query: "parent-dm:unknown"))
+expect(
+    unknownParentDateHint.canUseDatabaseCandidates == false,
+    "parent unknown-date searches should avoid lossy SQLite candidate prefiltering"
 )
 
 let parentSizeHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch parent-size:>1kb"))
 expect(
-    parentSizeHint.canUseDatabaseCandidates == false,
-    "parent-size: searches should avoid lossy SQLite candidate prefiltering"
+    parentSizeHint.canUseDatabaseCandidates &&
+        parentSizeHint.terms == ["launch"] &&
+        parentSizeHint.parentSizeFilters.count == 1,
+    "parent-size: searches should be pushed into SQLite candidate hints"
 )
 
 let ancestorHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch ancestor:/Users/me/Documents"))
@@ -5317,6 +5327,55 @@ do {
     expect(
         Set(partialParentPathLaunchCandidates.map(\.path)) == Set([document.path, folder.path]),
         "SQLite candidate search should preserve partial parent-path matches"
+    )
+
+    let parentMetadataCandidateDatabaseURL = temporaryDirectory.appending(path: "ParentMetadataCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(
+            rootPath: "/Users/me",
+            entries: [metadataParentFolder, metadataParentChild, document]
+        ),
+        to: parentMetadataCandidateDatabaseURL
+    )
+
+    let parentCreatedDateCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "parent-dc:2024-02-03")),
+        limit: 20,
+        from: parentMetadataCandidateDatabaseURL
+    )
+    expect(
+        parentCreatedDateCandidates.map(\.path) == [metadataParentChild.path],
+        "SQLite candidate search should apply parent created-date filters"
+    )
+
+    let parentModifiedDateCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "parent-dm:2024-03-04")),
+        limit: 20,
+        from: parentMetadataCandidateDatabaseURL
+    )
+    expect(
+        parentModifiedDateCandidates.map(\.path) == [metadataParentChild.path],
+        "SQLite candidate search should apply parent modified-date filters"
+    )
+
+    let parentSizeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "parent-size:4kb")),
+        limit: 20,
+        from: parentMetadataCandidateDatabaseURL
+    )
+    expect(
+        parentSizeCandidates.map(\.path) == [metadataParentChild.path],
+        "SQLite candidate search should apply parent-size filters"
+    )
+
+    let parentSizeRangeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "parent-size:3kb..5kb")),
+        limit: 20,
+        from: parentMetadataCandidateDatabaseURL
+    )
+    expect(
+        parentSizeRangeCandidates.map(\.path) == [metadataParentChild.path],
+        "SQLite parent-size range filters should apply comparisons to the same indexed parent"
     )
 
     let identityCandidateDatabaseURL = temporaryDirectory.appending(path: "IdentityCandidates.db")

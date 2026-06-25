@@ -665,6 +665,22 @@ public struct SearchCandidateChildFileListFilter: Sendable {
     }
 }
 
+public struct SearchCandidateParentDateFilter: Sendable {
+    public let filters: [SearchCandidateDateFilter]
+
+    public init(filters: [SearchCandidateDateFilter]) {
+        self.filters = filters
+    }
+}
+
+public struct SearchCandidateParentSizeFilter: Sendable {
+    public let filters: [SearchCandidateNumericFilter]
+
+    public init(filters: [SearchCandidateNumericFilter]) {
+        self.filters = filters
+    }
+}
+
 public struct SearchCandidateHint: Sendable {
     public let terms: [String]
     public let canUseDatabaseCandidates: Bool
@@ -682,6 +698,8 @@ public struct SearchCandidateHint: Sendable {
     public let childDateFilters: [SearchCandidateChildDateFilter]
     public let childAttributeFilters: [SearchCandidateChildAttributeFilter]
     public let childFileListFilters: [SearchCandidateChildFileListFilter]
+    public let parentDateFilters: [SearchCandidateParentDateFilter]
+    public let parentSizeFilters: [SearchCandidateParentSizeFilter]
     public let fileReferenceFilter: SearchCandidateFileReferenceFilter?
     public let requiresFileListSource: Bool
     public let rootOnly: Bool
@@ -706,6 +724,8 @@ public struct SearchCandidateHint: Sendable {
         childDateFilters: [SearchCandidateChildDateFilter] = [],
         childAttributeFilters: [SearchCandidateChildAttributeFilter] = [],
         childFileListFilters: [SearchCandidateChildFileListFilter] = [],
+        parentDateFilters: [SearchCandidateParentDateFilter] = [],
+        parentSizeFilters: [SearchCandidateParentSizeFilter] = [],
         fileReferenceFilter: SearchCandidateFileReferenceFilter? = nil,
         requiresFileListSource: Bool = false,
         rootOnly: Bool = false,
@@ -729,6 +749,8 @@ public struct SearchCandidateHint: Sendable {
         self.childDateFilters = childDateFilters
         self.childAttributeFilters = childAttributeFilters
         self.childFileListFilters = childFileListFilters
+        self.parentDateFilters = parentDateFilters
+        self.parentSizeFilters = parentSizeFilters
         self.fileReferenceFilter = fileReferenceFilter
         self.requiresFileListSource = requiresFileListSource
         self.rootOnly = rootOnly
@@ -752,6 +774,8 @@ public struct SearchCandidateHint: Sendable {
             !childDateFilters.isEmpty ||
             !childAttributeFilters.isEmpty ||
             !childFileListFilters.isEmpty ||
+            !parentDateFilters.isEmpty ||
+            !parentSizeFilters.isEmpty ||
             fileReferenceFilter != nil ||
             requiresFileListSource ||
             rootOnly ||
@@ -949,6 +973,8 @@ public enum SearchEngine {
         var childDateFilters: [SearchCandidateChildDateFilter] = []
         var childAttributeFilters: [SearchCandidateChildAttributeFilter] = []
         var childFileListFilters: [SearchCandidateChildFileListFilter] = []
+        var parentDateFilters: [SearchCandidateParentDateFilter] = []
+        var parentSizeFilters: [SearchCandidateParentSizeFilter] = []
         var fileReferenceFilter: SearchCandidateFileReferenceFilter?
         var requiresFileListSource = false
         var rootOnly = false
@@ -1244,6 +1270,33 @@ public enum SearchEngine {
                     if !value.isEmpty {
                         terms.append(value)
                     }
+                case "parentdatecreated", "parentdc":
+                    guard let filter = DateFilter.parse(value) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    let filters = filter.candidateFilters(field: .dateCreated)
+                    guard !filters.isEmpty else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    parentDateFilters.append(SearchCandidateParentDateFilter(filters: filters))
+                case "parentdatemodified", "parentdm":
+                    guard let filter = DateFilter.parse(value) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    let filters = filter.candidateFilters(field: .dateModified)
+                    guard !filters.isEmpty else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    parentDateFilters.append(SearchCandidateParentDateFilter(filters: filters))
+                case "parentsize":
+                    guard let filter = ComparisonFilter<Int64>.parse(value, valueParser: parseByteSize) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    let filters = filter.candidateFilters(field: .byteSize)
+                    guard !filters.isEmpty else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    parentSizeFilters.append(SearchCandidateParentSizeFilter(filters: filters))
                 case "ext", "extension":
                     if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         extensions.insert("")
@@ -1689,8 +1742,6 @@ public enum SearchEngine {
                      "parentchild", "parentchildname", "parentchildfile",
                      "parentchildfilename", "parentchildfolder", "parentchildfoldername",
                      "parentchilddir", "parentchilddirname",
-                     "parentdatecreated", "parentdc", "parentdatemodified",
-                     "parentdm", "parentsize",
                      "parentsibling", "parentsiblingfile", "parentsiblingfolder",
                      "ancestorsibling", "ancestorsiblingfile", "ancestorsiblingfolder",
                      "namepartdupe", "sizedupe",
@@ -1724,6 +1775,8 @@ public enum SearchEngine {
             !childDateFilters.isEmpty ||
             !childAttributeFilters.isEmpty ||
             !childFileListFilters.isEmpty ||
+            !parentDateFilters.isEmpty ||
+            !parentSizeFilters.isEmpty ||
             fileReferenceFilter != nil ||
             requiresFileListSource ||
             rootOnly ||
@@ -1747,6 +1800,8 @@ public enum SearchEngine {
             childDateFilters: childDateFilters,
             childAttributeFilters: childAttributeFilters,
             childFileListFilters: childFileListFilters,
+            parentDateFilters: parentDateFilters,
+            parentSizeFilters: parentSizeFilters,
             fileReferenceFilter: fileReferenceFilter,
             requiresFileListSource: requiresFileListSource,
             rootOnly: rootOnly,
