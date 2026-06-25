@@ -639,6 +639,22 @@ public struct SearchCandidateChildDateFilter: Sendable {
     }
 }
 
+public struct SearchCandidateChildAttributeFilter: Sendable {
+    public let allowedKinds: Set<FileKind>?
+    public let requiredAttributes: FileAttributes
+    public let excludedAttributes: FileAttributes
+
+    public init(
+        allowedKinds: Set<FileKind>?,
+        requiredAttributes: FileAttributes,
+        excludedAttributes: FileAttributes
+    ) {
+        self.allowedKinds = allowedKinds
+        self.requiredAttributes = requiredAttributes
+        self.excludedAttributes = excludedAttributes
+    }
+}
+
 public struct SearchCandidateHint: Sendable {
     public let terms: [String]
     public let canUseDatabaseCandidates: Bool
@@ -654,6 +670,7 @@ public struct SearchCandidateHint: Sendable {
     public let childSizeFilters: [SearchCandidateChildSizeFilter]
     public let childRunCountFilters: [SearchCandidateChildRunCountFilter]
     public let childDateFilters: [SearchCandidateChildDateFilter]
+    public let childAttributeFilters: [SearchCandidateChildAttributeFilter]
     public let fileReferenceFilter: SearchCandidateFileReferenceFilter?
     public let requiresFileListSource: Bool
     public let rootOnly: Bool
@@ -676,6 +693,7 @@ public struct SearchCandidateHint: Sendable {
         childSizeFilters: [SearchCandidateChildSizeFilter] = [],
         childRunCountFilters: [SearchCandidateChildRunCountFilter] = [],
         childDateFilters: [SearchCandidateChildDateFilter] = [],
+        childAttributeFilters: [SearchCandidateChildAttributeFilter] = [],
         fileReferenceFilter: SearchCandidateFileReferenceFilter? = nil,
         requiresFileListSource: Bool = false,
         rootOnly: Bool = false,
@@ -697,6 +715,7 @@ public struct SearchCandidateHint: Sendable {
         self.childSizeFilters = childSizeFilters
         self.childRunCountFilters = childRunCountFilters
         self.childDateFilters = childDateFilters
+        self.childAttributeFilters = childAttributeFilters
         self.fileReferenceFilter = fileReferenceFilter
         self.requiresFileListSource = requiresFileListSource
         self.rootOnly = rootOnly
@@ -718,6 +737,7 @@ public struct SearchCandidateHint: Sendable {
             !childSizeFilters.isEmpty ||
             !childRunCountFilters.isEmpty ||
             !childDateFilters.isEmpty ||
+            !childAttributeFilters.isEmpty ||
             fileReferenceFilter != nil ||
             requiresFileListSource ||
             rootOnly ||
@@ -913,6 +933,7 @@ public enum SearchEngine {
         var childSizeFilters: [SearchCandidateChildSizeFilter] = []
         var childRunCountFilters: [SearchCandidateChildRunCountFilter] = []
         var childDateFilters: [SearchCandidateChildDateFilter] = []
+        var childAttributeFilters: [SearchCandidateChildAttributeFilter] = []
         var fileReferenceFilter: SearchCandidateFileReferenceFilter?
         var requiresFileListSource = false
         var rootOnly = false
@@ -1553,6 +1574,39 @@ public enum SearchEngine {
                         required: &requiredAttributes,
                         excluded: &excludedAttributes
                     )
+                case "childattr", "childattrib", "childattribute", "childattributes":
+                    guard let filter = AttributeFilter.parse(value) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    childAttributeFilters.append(
+                        SearchCandidateChildAttributeFilter(
+                            allowedKinds: nil,
+                            requiredAttributes: filter.required,
+                            excludedAttributes: filter.excluded
+                        )
+                    )
+                case "childfileattr", "childfileattrib", "childfileattribute", "childfileattributes":
+                    guard let filter = AttributeFilter.parse(value) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    childAttributeFilters.append(
+                        SearchCandidateChildAttributeFilter(
+                            allowedKinds: [.file, .symlink, .other],
+                            requiredAttributes: filter.required,
+                            excludedAttributes: filter.excluded
+                        )
+                    )
+                case "childfolderattr", "childfolderattrib", "childfolderattribute", "childfolderattributes":
+                    guard let filter = AttributeFilter.parse(value) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    childAttributeFilters.append(
+                        SearchCandidateChildAttributeFilter(
+                            allowedKinds: [.folder, .package],
+                            requiredAttributes: filter.required,
+                            excludedAttributes: filter.excluded
+                        )
+                    )
                 case "title", "artist", "album", "comment", "genre":
                     guard let field = mediaTextField(for: function) else {
                         continue
@@ -1582,10 +1636,6 @@ public enum SearchEngine {
                      "childfile", "childfilename", "childfilenames",
                      "childfolder", "childfoldername", "childfoldernames",
                      "childdir", "childdirname", "childdirs", "childdirnames",
-                     "childattr", "childattrib", "childattribute", "childattributes",
-                     "childfileattr", "childfileattrib", "childfileattribute",
-                     "childfileattributes", "childfolderattr", "childfolderattrib",
-                     "childfolderattribute", "childfolderattributes",
                      "childfilelist",
                      "sibling", "siblingname", "siblingfile",
                      "siblingfiles", "siblingfolder", "siblingfolders",
@@ -1636,6 +1686,7 @@ public enum SearchEngine {
             !childSizeFilters.isEmpty ||
             !childRunCountFilters.isEmpty ||
             !childDateFilters.isEmpty ||
+            !childAttributeFilters.isEmpty ||
             fileReferenceFilter != nil ||
             requiresFileListSource ||
             rootOnly ||
@@ -1657,6 +1708,7 @@ public enum SearchEngine {
             childSizeFilters: childSizeFilters,
             childRunCountFilters: childRunCountFilters,
             childDateFilters: childDateFilters,
+            childAttributeFilters: childAttributeFilters,
             fileReferenceFilter: fileReferenceFilter,
             requiresFileListSource: requiresFileListSource,
             rootOnly: rootOnly,

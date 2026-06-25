@@ -745,6 +745,16 @@ private final class SQLiteDatabase {
             bindings.append(contentsOf: childFilter.bindings)
         }
 
+        for filter in hint.childAttributeFilters {
+            let childFilter = childAttributeFilterClause(
+                prefix: prefix,
+                tablePrefix: tablePrefix,
+                filter: filter
+            )
+            clauses.append(childFilter.clause)
+            bindings.append(contentsOf: childFilter.bindings)
+        }
+
         if let filter = hint.fileReferenceFilter {
             if let fileID = filter.fileID, !fileID.isEmpty {
                 clauses.append("LOWER(\(prefix)file_id) = ?")
@@ -972,6 +982,47 @@ private final class SQLiteDatabase {
         for dateFilter in filter.filters {
             childClauses.append("child.\(column(for: dateFilter.field)) \(sqlOperator(for: dateFilter.op)) ?")
             bindings.append(.date(dateFilter.value))
+        }
+
+        let clause = """
+            (
+                \(prefix)kind IN ('folder', 'package')
+                AND EXISTS (
+                    SELECT 1
+                    FROM entries AS child
+                    WHERE \(childClauses.joined(separator: " AND "))
+                    LIMIT 1
+                )
+            )
+            """
+        return (clause, bindings)
+    }
+
+    private func childAttributeFilterClause(
+        prefix: String,
+        tablePrefix: String?,
+        filter: SearchCandidateChildAttributeFilter
+    ) -> (clause: String, bindings: [SQLiteValue]) {
+        let pathExpression = outerPathExpression(tablePrefix: tablePrefix)
+        var childClauses = ["child.parent = \(pathExpression)"]
+        var bindings: [SQLiteValue] = []
+
+        if let allowedKinds = filter.allowedKinds {
+            let kinds = allowedKinds.map(\.rawValue).sorted()
+            childClauses.append("child.kind IN (\(placeholders(count: kinds.count)))")
+            bindings.append(contentsOf: kinds.map(SQLiteValue.text))
+        }
+
+        if !filter.requiredAttributes.isEmpty {
+            let rawValue = Int64(filter.requiredAttributes.rawValue)
+            childClauses.append("(child.attributes & ?) = ?")
+            bindings.append(.int(rawValue))
+            bindings.append(.int(rawValue))
+        }
+
+        if !filter.excludedAttributes.isEmpty {
+            childClauses.append("(child.attributes & ?) = 0")
+            bindings.append(.int(Int64(filter.excludedAttributes.rawValue)))
         }
 
         let clause = """

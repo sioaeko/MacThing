@@ -3312,8 +3312,32 @@ expect(
 
 let childAttributeHint = SearchEngine.candidateHint(for: SearchRequest(query: "child-file-attr:h"))
 expect(
-    childAttributeHint.canUseDatabaseCandidates == false,
-    "child-file-attr: searches should avoid lossy SQLite candidate prefiltering"
+    childAttributeHint.canUseDatabaseCandidates &&
+        childAttributeHint.childAttributeFilters.contains {
+            $0.allowedKinds == Set<FileKind>([.file, .symlink, .other]) &&
+                $0.requiredAttributes.contains(.hidden)
+        },
+    "child-file-attr: searches should be pushed into SQLite candidate hints"
+)
+
+let childExcludedAttributeHint = SearchEngine.candidateHint(for: SearchRequest(query: "child-file-attr:!h"))
+expect(
+    childExcludedAttributeHint.canUseDatabaseCandidates &&
+        childExcludedAttributeHint.childAttributeFilters.contains {
+            $0.allowedKinds == Set<FileKind>([.file, .symlink, .other]) &&
+                $0.excludedAttributes.contains(.hidden)
+        },
+    "negative child-file-attr: searches should be pushed into SQLite candidate hints"
+)
+
+let childFolderAttributeHint = SearchEngine.candidateHint(for: SearchRequest(query: "child-folder-attr:d"))
+expect(
+    childFolderAttributeHint.canUseDatabaseCandidates &&
+        childFolderAttributeHint.childAttributeFilters.contains {
+            $0.allowedKinds == Set<FileKind>([.folder, .package]) &&
+                $0.requiredAttributes.contains(.directory)
+        },
+    "child-folder-attr: searches should be pushed into SQLite candidate hints"
 )
 
 let childDateHint = SearchEngine.candidateHint(for: SearchRequest(query: "child-dm:>2024-01-01"))
@@ -5599,6 +5623,51 @@ do {
     expect(
         childDateRunCandidates.map(\.path) == [folder.path],
         "SQLite candidate search should apply child date-run filters"
+    )
+
+    let childAttributeCandidateDatabaseURL = temporaryDirectory.appending(path: "ChildAttributeCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: "/Users/me", entries: [folder, childInFolder, hiddenChildInFolder, childFolderInFolder]),
+        to: childAttributeCandidateDatabaseURL
+    )
+    let childAttributeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "child-attr:h")),
+        limit: 20,
+        from: childAttributeCandidateDatabaseURL
+    )
+    expect(
+        childAttributeCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply child-attr filters"
+    )
+
+    let childFileAttributeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "child-file-attr:h")),
+        limit: 20,
+        from: childAttributeCandidateDatabaseURL
+    )
+    expect(
+        childFileAttributeCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply child-file-attr filters"
+    )
+
+    let childFileExcludedAttributeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "child-file-attr:!h")),
+        limit: 20,
+        from: childAttributeCandidateDatabaseURL
+    )
+    expect(
+        childFileExcludedAttributeCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply negative child-file-attr filters"
+    )
+
+    let childFolderAttributeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "child-folder-attr:d")),
+        limit: 20,
+        from: childAttributeCandidateDatabaseURL
+    )
+    expect(
+        childFolderAttributeCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply child-folder-attr filters"
     )
 
     let siblingCountCandidateDatabaseURL = temporaryDirectory.appending(path: "SiblingCountCandidates.db")
