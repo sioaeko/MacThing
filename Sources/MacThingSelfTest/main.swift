@@ -3324,8 +3324,27 @@ expect(
 
 let childRunCountHint = SearchEngine.candidateHint(for: SearchRequest(query: "child-run-count:>0"))
 expect(
-    childRunCountHint.canUseDatabaseCandidates == false,
-    "child-run-count: searches should avoid lossy SQLite candidate prefiltering"
+    childRunCountHint.canUseDatabaseCandidates &&
+        childRunCountHint.childRunCountFilters.count == 1,
+    "child-run-count: searches should be pushed into SQLite candidate hints"
+)
+
+let childFileRunCountHint = SearchEngine.candidateHint(for: SearchRequest(query: "child-file-run-count:>0"))
+expect(
+    childFileRunCountHint.canUseDatabaseCandidates &&
+        childFileRunCountHint.childRunCountFilters.contains {
+            $0.allowedKinds == Set<FileKind>([.file, .symlink, .other])
+        },
+    "child-file-run-count: searches should be pushed into SQLite candidate hints"
+)
+
+let childFolderRunCountHint = SearchEngine.candidateHint(for: SearchRequest(query: "child-folder-run-count:>0"))
+expect(
+    childFolderRunCountHint.canUseDatabaseCandidates &&
+        childFolderRunCountHint.childRunCountFilters.contains {
+            $0.allowedKinds == Set<FileKind>([.folder, .package])
+        },
+    "child-folder-run-count: searches should be pushed into SQLite candidate hints"
 )
 
 let childSizeHint = SearchEngine.candidateHint(for: SearchRequest(query: "child-size:>1kb"))
@@ -5484,6 +5503,46 @@ do {
     expect(
         childFolderSizeCandidates.map(\.path) == [folder.path],
         "SQLite candidate search should apply child-folder-size filters"
+    )
+
+    let childRunCountCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "child-run-count:7")),
+        limit: 20,
+        from: childSizeCandidateDatabaseURL
+    )
+    expect(
+        childRunCountCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply child-run-count filters"
+    )
+
+    let childRunCountRangeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "child-run-count:6..8")),
+        limit: 20,
+        from: childSizeCandidateDatabaseURL
+    )
+    expect(
+        childRunCountRangeCandidates.map(\.path) == [folder.path],
+        "SQLite child-run-count range filters should apply comparisons to the same direct child"
+    )
+
+    let childFileRunCountCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "child-file-run-count:7")),
+        limit: 20,
+        from: childSizeCandidateDatabaseURL
+    )
+    expect(
+        childFileRunCountCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply child-file-run-count filters"
+    )
+
+    let childFolderRunCountCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "child-folder-run-count:3")),
+        limit: 20,
+        from: childSizeCandidateDatabaseURL
+    )
+    expect(
+        childFolderRunCountCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply child-folder-run-count filters"
     )
 
     let siblingCountCandidateDatabaseURL = temporaryDirectory.appending(path: "SiblingCountCandidates.db")

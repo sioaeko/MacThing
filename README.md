@@ -91,10 +91,10 @@ The current packaged release is available from GitHub:
   `dm:unknown`, file attributes, media track/year metadata, filesystem identity
   (`frn:`) filters, root-entry (`root:`) filters, file-list provenance
   (`filelistfilename:`) filters, empty-entry (`empty:`) filters, exact
-  direct-parent filters, direct-child count, child-size, and total-size filters,
-  sibling count filters, depth/parent-count filters, safe parent/ancestor path
-  text filters, filename/path/extension length filters, and
-  diacritic-sensitive media text filters.
+  direct-parent filters, direct-child count, child run-count/size, and
+  total-size filters, sibling count filters, depth/parent-count filters,
+  safe parent/ancestor path text filters, filename/path/extension length
+  filters, and diacritic-sensitive media text filters.
 - File-name, path, wildcard, regex, and compact fuzzy matching. Wildcard and
   regex searches honor the same case/diacritic matching options as text search.
 - Match path, fuzzy, regex, case-sensitive, whole-word, and diacritic-sensitive
