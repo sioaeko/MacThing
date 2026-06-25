@@ -544,6 +544,9 @@ public enum SearchCandidateNumericField: String, Sendable {
     case childFileCount
     case childFolderCount
     case totalChildSize
+    case descendantCount
+    case descendantFileCount
+    case descendantFolderCount
     case siblingCount
     case siblingFileCount
     case siblingFolderCount
@@ -1412,6 +1415,21 @@ public enum SearchEngine {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
                     numericFilters.append(contentsOf: filter.candidateFilters(field: .totalChildSize))
+                case "descendantcount":
+                    guard let filter = ComparisonFilter<Int>.parse(value.isEmpty ? ">0" : value, valueParser: { Int($0) }) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .descendantCount))
+                case "descendantfilecount":
+                    guard let filter = ComparisonFilter<Int>.parse(value.isEmpty ? ">0" : value, valueParser: { Int($0) }) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .descendantFileCount))
+                case "descendantfoldercount":
+                    guard let filter = ComparisonFilter<Int>.parse(value.isEmpty ? ">0" : value, valueParser: { Int($0) }) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .descendantFolderCount))
                 case "siblingcount":
                     guard let filter = ComparisonFilter<Int>.parse(value.isEmpty ? ">0" : value, valueParser: { Int($0) }) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
@@ -1734,8 +1752,7 @@ public enum SearchEngine {
                      "descendantfilename", "descendantfilenames", "descendantfolder",
                      "descendantfoldername", "descendantfoldernames",
                      "descendantdir", "descendantdirname", "descendantdirs",
-                     "descendantdirnames", "descendantcount", "descendantfilecount",
-                     "descendantfoldercount", "ancestorattr", "ancestorattrib",
+                     "descendantdirnames", "ancestorattr", "ancestorattrib",
                      "ancestorattribute", "ancestorattributes",
                      "ancestorchild", "ancestorchildfile", "ancestorchildfolder",
                      "pathlist", "fullpathlist",

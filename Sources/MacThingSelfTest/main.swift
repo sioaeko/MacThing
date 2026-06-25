@@ -3302,10 +3302,25 @@ expect(
     "descendant: searches should avoid lossy SQLite candidate prefiltering"
 )
 
+let descendantCountHint = SearchEngine.candidateHint(for: SearchRequest(query: "descendant-count:>0"))
+expect(
+    descendantCountHint.canUseDatabaseCandidates &&
+        descendantCountHint.numericFilters.first?.field == .descendantCount,
+    "descendant-count: searches should be pushed into SQLite candidate hints"
+)
+
 let descendantFileCountHint = SearchEngine.candidateHint(for: SearchRequest(query: "descendant-file-count:>0"))
 expect(
-    descendantFileCountHint.canUseDatabaseCandidates == false,
-    "descendant-file-count: searches should avoid lossy SQLite candidate prefiltering"
+    descendantFileCountHint.canUseDatabaseCandidates &&
+        descendantFileCountHint.numericFilters.first?.field == .descendantFileCount,
+    "descendant-file-count: searches should be pushed into SQLite candidate hints"
+)
+
+let descendantFolderCountHint = SearchEngine.candidateHint(for: SearchRequest(query: "descendant-folder-count:>0"))
+expect(
+    descendantFolderCountHint.canUseDatabaseCandidates &&
+        descendantFolderCountHint.numericFilters.first?.field == .descendantFolderCount,
+    "descendant-folder-count: searches should be pushed into SQLite candidate hints"
 )
 
 let ancestorAttributeHint = SearchEngine.candidateHint(for: SearchRequest(query: "ancestor-attr:h"))
@@ -5551,6 +5566,46 @@ do {
     expect(
         childFolderCountCandidates.map(\.path) == [folder.path],
         "SQLite candidate search should apply child-folder-count filters"
+    )
+
+    let descendantCountCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "descendant-count:3")),
+        limit: 20,
+        from: childCountCandidateDatabaseURL
+    )
+    expect(
+        descendantCountCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply descendant-count filters"
+    )
+
+    let descendantFileCountCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "descendant-file-count:2")),
+        limit: 20,
+        from: childCountCandidateDatabaseURL
+    )
+    expect(
+        descendantFileCountCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply descendant-file-count filters"
+    )
+
+    let descendantFolderCountCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "descendant-folder-count:1")),
+        limit: 20,
+        from: childCountCandidateDatabaseURL
+    )
+    expect(
+        descendantFolderCountCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply descendant-folder-count filters"
+    )
+
+    let zeroDescendantCountCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "descendant-count:0")),
+        limit: 20,
+        from: childCountCandidateDatabaseURL
+    )
+    expect(
+        zeroDescendantCountCandidates.isEmpty,
+        "SQLite descendant-count filters should not treat non-containers as zero-descendant containers"
     )
 
     let totalChildSizeCandidates = try IndexStorage.candidateEntries(

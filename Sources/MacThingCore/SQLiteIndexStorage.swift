@@ -882,6 +882,12 @@ private final class SQLiteDatabase {
             return childCountExpression(prefix: prefix, tablePrefix: tablePrefix, allowedKinds: [.folder, .package])
         case .totalChildSize:
             return totalChildSizeExpression(prefix: prefix, tablePrefix: tablePrefix)
+        case .descendantCount:
+            return descendantCountExpression(prefix: prefix, tablePrefix: tablePrefix, allowedKinds: nil)
+        case .descendantFileCount:
+            return descendantCountExpression(prefix: prefix, tablePrefix: tablePrefix, allowedKinds: [.file, .symlink, .other])
+        case .descendantFolderCount:
+            return descendantCountExpression(prefix: prefix, tablePrefix: tablePrefix, allowedKinds: [.folder, .package])
         case .siblingCount:
             return siblingCountExpression(prefix: prefix, tablePrefix: tablePrefix, allowedKinds: nil)
         case .siblingFileCount:
@@ -918,6 +924,41 @@ private final class SQLiteDatabase {
                         FROM entries AS child
                         WHERE child.parent = \(pathExpression)
                             AND child.kind IN ('file', 'other', 'symlink')
+                    )
+                ELSE NULL
+            END)
+            """
+    }
+
+    private func descendantCountExpression(prefix: String, tablePrefix: String?, allowedKinds: [FileKind]?) -> String {
+        let pathExpression = outerPathExpression(tablePrefix: tablePrefix)
+        let countFilter: String
+        if let allowedKinds {
+            let kinds = allowedKinds.map(\.rawValue).sorted()
+            let quotedKinds = kinds.map { "'\(escapeSQLLiteral($0))'" }.joined(separator: ", ")
+            countFilter = "WHERE descendant_kind IN (\(quotedKinds))"
+        } else {
+            countFilter = ""
+        }
+
+        return """
+            (CASE
+                WHEN \(prefix)kind IN ('folder', 'package') THEN
+                    (
+                        WITH RECURSIVE descendant_tree(descendant_path, descendant_kind) AS (
+                            SELECT child.path, child.kind
+                            FROM entries AS child
+                            WHERE child.parent = \(pathExpression)
+                            UNION
+                            SELECT nested.path, nested.kind
+                            FROM entries AS nested
+                            JOIN descendant_tree
+                                ON nested.parent = descendant_tree.descendant_path
+                            WHERE descendant_tree.descendant_kind IN ('folder', 'package')
+                        )
+                        SELECT COUNT(1)
+                        FROM descendant_tree
+                        \(countFilter)
                     )
                 ELSE NULL
             END)

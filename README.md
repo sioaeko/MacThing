@@ -92,8 +92,8 @@ The current packaged release is available from GitHub:
   (`frn:`) filters, root-entry (`root:`) filters, file-list provenance
   (`filelistfilename:`) filters, empty-entry (`empty:`) filters, exact
   direct-parent filters, direct-child count, child attr/date/run-count/size,
-  exact child file-list filters, parent date/size filters, total-size filters,
-  sibling count filters, depth/parent-count filters,
+  exact child file-list filters, descendant count filters, parent date/size filters,
+  total-size filters, sibling count filters, depth/parent-count filters,
   safe parent/ancestor path text filters, filename/path/extension length
   filters, and diacritic-sensitive media text filters.
 - File-name, path, wildcard, regex, and compact fuzzy matching. Wildcard and
