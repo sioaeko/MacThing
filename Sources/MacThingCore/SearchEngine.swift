@@ -754,6 +754,30 @@ public struct SearchCandidateAncestorChildFilter: Sendable {
     }
 }
 
+public struct SearchCandidateParentSiblingFilter: Sendable {
+    public let allowedKinds: Set<FileKind>?
+    public let value: String?
+    public let searchesPath: Bool
+
+    public init(allowedKinds: Set<FileKind>?, value: String?, searchesPath: Bool = false) {
+        self.allowedKinds = allowedKinds
+        self.value = value
+        self.searchesPath = searchesPath
+    }
+}
+
+public struct SearchCandidateAncestorSiblingFilter: Sendable {
+    public let allowedKinds: Set<FileKind>?
+    public let value: String?
+    public let searchesPath: Bool
+
+    public init(allowedKinds: Set<FileKind>?, value: String?, searchesPath: Bool = false) {
+        self.allowedKinds = allowedKinds
+        self.value = value
+        self.searchesPath = searchesPath
+    }
+}
+
 public struct SearchCandidateHint: Sendable {
     public let terms: [String]
     public let canUseDatabaseCandidates: Bool
@@ -779,6 +803,8 @@ public struct SearchCandidateHint: Sendable {
     public let childTextFilters: [SearchCandidateChildTextFilter]
     public let descendantTextFilters: [SearchCandidateDescendantTextFilter]
     public let ancestorChildFilters: [SearchCandidateAncestorChildFilter]
+    public let parentSiblingFilters: [SearchCandidateParentSiblingFilter]
+    public let ancestorSiblingFilters: [SearchCandidateAncestorSiblingFilter]
     public let fileReferenceFilter: SearchCandidateFileReferenceFilter?
     public let requiresFileListSource: Bool
     public let rootOnly: Bool
@@ -811,6 +837,8 @@ public struct SearchCandidateHint: Sendable {
         childTextFilters: [SearchCandidateChildTextFilter] = [],
         descendantTextFilters: [SearchCandidateDescendantTextFilter] = [],
         ancestorChildFilters: [SearchCandidateAncestorChildFilter] = [],
+        parentSiblingFilters: [SearchCandidateParentSiblingFilter] = [],
+        ancestorSiblingFilters: [SearchCandidateAncestorSiblingFilter] = [],
         fileReferenceFilter: SearchCandidateFileReferenceFilter? = nil,
         requiresFileListSource: Bool = false,
         rootOnly: Bool = false,
@@ -842,6 +870,8 @@ public struct SearchCandidateHint: Sendable {
         self.childTextFilters = childTextFilters
         self.descendantTextFilters = descendantTextFilters
         self.ancestorChildFilters = ancestorChildFilters
+        self.parentSiblingFilters = parentSiblingFilters
+        self.ancestorSiblingFilters = ancestorSiblingFilters
         self.fileReferenceFilter = fileReferenceFilter
         self.requiresFileListSource = requiresFileListSource
         self.rootOnly = rootOnly
@@ -873,6 +903,8 @@ public struct SearchCandidateHint: Sendable {
             !childTextFilters.isEmpty ||
             !descendantTextFilters.isEmpty ||
             !ancestorChildFilters.isEmpty ||
+            !parentSiblingFilters.isEmpty ||
+            !ancestorSiblingFilters.isEmpty ||
             fileReferenceFilter != nil ||
             requiresFileListSource ||
             rootOnly ||
@@ -1078,6 +1110,8 @@ public enum SearchEngine {
         var childTextFilters: [SearchCandidateChildTextFilter] = []
         var descendantTextFilters: [SearchCandidateDescendantTextFilter] = []
         var ancestorChildFilters: [SearchCandidateAncestorChildFilter] = []
+        var parentSiblingFilters: [SearchCandidateParentSiblingFilter] = []
+        var ancestorSiblingFilters: [SearchCandidateAncestorSiblingFilter] = []
         var fileReferenceFilter: SearchCandidateFileReferenceFilter?
         var requiresFileListSource = false
         var rootOnly = false
@@ -1370,6 +1404,50 @@ public enum SearchEngine {
 
             ancestorChildFilters.append(
                 SearchCandidateAncestorChildFilter(
+                    allowedKinds: allowedKinds,
+                    value: value,
+                    searchesPath: request.options.matchPath || value.contains("/") || value.contains("\\")
+                )
+            )
+            return true
+        }
+
+        func addParentSiblingCandidateHint(value: String, allowedKinds: Set<FileKind>?) -> Bool {
+            if value.isEmpty {
+                parentSiblingFilters.append(SearchCandidateParentSiblingFilter(allowedKinds: allowedKinds, value: nil))
+                return true
+            }
+
+            guard request.options.caseSensitive,
+                  request.options.diacriticSensitive,
+                  !request.options.wholeWordMatching else {
+                return false
+            }
+
+            parentSiblingFilters.append(
+                SearchCandidateParentSiblingFilter(
+                    allowedKinds: allowedKinds,
+                    value: value,
+                    searchesPath: request.options.matchPath || value.contains("/") || value.contains("\\")
+                )
+            )
+            return true
+        }
+
+        func addAncestorSiblingCandidateHint(value: String, allowedKinds: Set<FileKind>?) -> Bool {
+            if value.isEmpty {
+                ancestorSiblingFilters.append(SearchCandidateAncestorSiblingFilter(allowedKinds: allowedKinds, value: nil))
+                return true
+            }
+
+            guard request.options.caseSensitive,
+                  request.options.diacriticSensitive,
+                  !request.options.wholeWordMatching else {
+                return false
+            }
+
+            ancestorSiblingFilters.append(
+                SearchCandidateAncestorSiblingFilter(
                     allowedKinds: allowedKinds,
                     value: value,
                     searchesPath: request.options.matchPath || value.contains("/") || value.contains("\\")
@@ -2017,14 +2095,36 @@ public enum SearchEngine {
                     guard addAncestorChildCandidateHint(value: value, allowedKinds: [.folder, .package]) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
+                case "parentsibling", "parentsiblingname":
+                    guard addParentSiblingCandidateHint(value: value, allowedKinds: nil) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                case "parentsiblingfile", "parentsiblingfilename":
+                    guard addParentSiblingCandidateHint(value: value, allowedKinds: [.file, .symlink, .other]) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                case "parentsiblingfolder", "parentsiblingfoldername", "parentsiblingdir", "parentsiblingdirname":
+                    guard addParentSiblingCandidateHint(value: value, allowedKinds: [.folder, .package]) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                case "ancestorsibling", "ancestorsiblingname":
+                    guard addAncestorSiblingCandidateHint(value: value, allowedKinds: nil) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                case "ancestorsiblingfile", "ancestorsiblingfilename":
+                    guard addAncestorSiblingCandidateHint(value: value, allowedKinds: [.file, .symlink, .other]) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                case "ancestorsiblingfolder", "ancestorsiblingfoldername", "ancestorsiblingdir", "ancestorsiblingdirname":
+                    guard addAncestorSiblingCandidateHint(value: value, allowedKinds: [.folder, .package]) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
                 case "content", "ansicontent", "utf8content", "utf16content", "utf16becontent",
                      "regex", "dupe", "dupename", "nothing",
                      "exists", "fileexists", "folderexists",
                      "namefrequency",
                      "extensionfrequency", "pathdupe",
                      "pathlist", "fullpathlist",
-                     "parentsibling", "parentsiblingfile", "parentsiblingfolder",
-                     "ancestorsibling", "ancestorsiblingfile", "ancestorsiblingfolder",
                      "namepartdupe", "sizedupe",
                      "attribdupe", "attrdupe", "dadupe", "dcdupe",
                      "dmdupe", "filelist", "fsi",
@@ -2064,6 +2164,8 @@ public enum SearchEngine {
             !childTextFilters.isEmpty ||
             !descendantTextFilters.isEmpty ||
             !ancestorChildFilters.isEmpty ||
+            !parentSiblingFilters.isEmpty ||
+            !ancestorSiblingFilters.isEmpty ||
             fileReferenceFilter != nil ||
             requiresFileListSource ||
             rootOnly ||
@@ -2095,6 +2197,8 @@ public enum SearchEngine {
             childTextFilters: childTextFilters,
             descendantTextFilters: descendantTextFilters,
             ancestorChildFilters: ancestorChildFilters,
+            parentSiblingFilters: parentSiblingFilters,
+            ancestorSiblingFilters: ancestorSiblingFilters,
             fileReferenceFilter: fileReferenceFilter,
             requiresFileListSource: requiresFileListSource,
             rootOnly: rootOnly,

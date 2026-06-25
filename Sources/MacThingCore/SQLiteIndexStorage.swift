@@ -810,6 +810,24 @@ private final class SQLiteDatabase {
             bindings.append(contentsOf: siblingFilter.bindings)
         }
 
+        for filter in hint.parentSiblingFilters {
+            let siblingFilter = parentSiblingFilterClause(
+                tablePrefix: tablePrefix,
+                filter: filter
+            )
+            clauses.append(siblingFilter.clause)
+            bindings.append(contentsOf: siblingFilter.bindings)
+        }
+
+        for filter in hint.ancestorSiblingFilters {
+            let siblingFilter = ancestorSiblingFilterClause(
+                tablePrefix: tablePrefix,
+                filter: filter
+            )
+            clauses.append(siblingFilter.clause)
+            bindings.append(contentsOf: siblingFilter.bindings)
+        }
+
         for filter in hint.childTextFilters {
             let childFilter = childTextFilterClause(
                 prefix: prefix,
@@ -1484,6 +1502,130 @@ private final class SQLiteDatabase {
             )
             """
         return (clause, bindings)
+    }
+
+    private func parentSiblingFilterClause(
+        tablePrefix: String?,
+        filter: SearchCandidateParentSiblingFilter
+    ) -> (clause: String, bindings: [SQLiteValue]) {
+        let parentExpression = outerParentExpression(tablePrefix: tablePrefix)
+        var siblingClauses = [
+            "sibling.parent != ''",
+            "sibling.path != \(parentExpression)",
+            directParentPathClause(
+                pathExpression: parentExpression,
+                candidateParentExpression: "sibling.parent"
+            )
+        ]
+        var bindings: [SQLiteValue] = []
+
+        appendSiblingTextFilterClauses(
+            filterAllowedKinds: filter.allowedKinds,
+            value: filter.value,
+            searchesPath: filter.searchesPath,
+            siblingClauses: &siblingClauses,
+            bindings: &bindings
+        )
+
+        let clause = """
+            EXISTS (
+                SELECT 1
+                FROM entries AS sibling
+                WHERE \(siblingClauses.joined(separator: " AND "))
+                LIMIT 1
+            )
+            """
+        return (clause, bindings)
+    }
+
+    private func ancestorSiblingFilterClause(
+        tablePrefix: String?,
+        filter: SearchCandidateAncestorSiblingFilter
+    ) -> (clause: String, bindings: [SQLiteValue]) {
+        let parentExpression = outerParentExpression(tablePrefix: tablePrefix)
+        var siblingClauses = [
+            "sibling.parent != ''",
+            """
+            (
+                sibling.parent = '/'
+                OR \(parentExpression) LIKE sibling.parent || '/%'
+            )
+            """,
+            """
+            NOT (
+                sibling.path = \(parentExpression)
+                OR (sibling.path = '/' AND (\(parentExpression) = '/' OR \(parentExpression) LIKE '/%'))
+                OR (sibling.path != '/' AND \(parentExpression) LIKE sibling.path || '/%')
+            )
+            """
+        ]
+        var bindings: [SQLiteValue] = []
+
+        appendSiblingTextFilterClauses(
+            filterAllowedKinds: filter.allowedKinds,
+            value: filter.value,
+            searchesPath: filter.searchesPath,
+            siblingClauses: &siblingClauses,
+            bindings: &bindings
+        )
+
+        let clause = """
+            EXISTS (
+                SELECT 1
+                FROM entries AS sibling
+                WHERE \(siblingClauses.joined(separator: " AND "))
+                LIMIT 1
+            )
+            """
+        return (clause, bindings)
+    }
+
+    private func directParentPathClause(pathExpression: String, candidateParentExpression: String) -> String {
+        """
+        (
+            (
+                \(candidateParentExpression) = '/'
+                AND (
+                    \(pathExpression) = '/'
+                    OR (
+                        substr(\(pathExpression), 1, 1) = '/'
+                        AND instr(substr(\(pathExpression), 2), '/') = 0
+                    )
+                )
+            )
+            OR (
+                \(candidateParentExpression) != '/'
+                AND \(pathExpression) LIKE \(candidateParentExpression) || '/%'
+                AND instr(substr(\(pathExpression), length(\(candidateParentExpression)) + 2), '/') = 0
+            )
+        )
+        """
+    }
+
+    private func appendSiblingTextFilterClauses(
+        filterAllowedKinds allowedKinds: Set<FileKind>?,
+        value: String?,
+        searchesPath: Bool,
+        siblingClauses: inout [String],
+        bindings: inout [SQLiteValue]
+    ) {
+        if let allowedKinds {
+            let kinds = allowedKinds.map(\.rawValue).sorted()
+            siblingClauses.append("sibling.kind IN (\(placeholders(count: kinds.count)))")
+            bindings.append(contentsOf: kinds.map(SQLiteValue.text))
+        }
+
+        if let value, !value.isEmpty {
+            var matchClauses = ["instr(sibling.name, ?) > 0"]
+            bindings.append(.text(value))
+
+            if searchesPath {
+                matchClauses.append("instr(sibling.path, ?) > 0")
+                bindings.append(.text(value))
+            }
+
+            siblingClauses.append("(\(matchClauses.joined(separator: " OR ")))")
+        }
     }
 
     private func ancestorAttributeFilterClause(

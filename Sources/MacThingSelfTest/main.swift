@@ -3245,10 +3245,60 @@ expect(
     "parent-sibling: searches should avoid lossy SQLite candidate prefiltering"
 )
 
+let parentSiblingPresenceHint = SearchEngine.candidateHint(for: SearchRequest(query: "parent-sibling:"))
+expect(
+    parentSiblingPresenceHint.canUseDatabaseCandidates &&
+        parentSiblingPresenceHint.parentSiblingFilters.first?.value == nil,
+    "parent-sibling: presence searches should be pushed into SQLite candidate hints"
+)
+
+let exactParentSiblingHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "parent-sibling:Empty", options: exactParentChildOptions)
+)
+expect(
+    exactParentSiblingHint.canUseDatabaseCandidates &&
+        exactParentSiblingHint.parentSiblingFilters.first?.value == "Empty",
+    "exact parent-sibling: searches should be pushed into SQLite candidate hints"
+)
+
+let exactParentSiblingFolderHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "parent-sibling-folder:Archive", options: exactParentChildOptions)
+)
+expect(
+    exactParentSiblingFolderHint.canUseDatabaseCandidates &&
+        exactParentSiblingFolderHint.parentSiblingFilters.first?.allowedKinds == Set<FileKind>([.folder, .package]),
+    "exact parent-sibling-folder: searches should preserve kind filters in SQLite candidate hints"
+)
+
 let ancestorSiblingHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch ancestor-sibling:Empty"))
 expect(
     ancestorSiblingHint.canUseDatabaseCandidates == false,
     "ancestor-sibling: searches should avoid lossy SQLite candidate prefiltering"
+)
+
+let ancestorSiblingPresenceHint = SearchEngine.candidateHint(for: SearchRequest(query: "ancestor-sibling:"))
+expect(
+    ancestorSiblingPresenceHint.canUseDatabaseCandidates &&
+        ancestorSiblingPresenceHint.ancestorSiblingFilters.first?.value == nil,
+    "ancestor-sibling: presence searches should be pushed into SQLite candidate hints"
+)
+
+let exactAncestorSiblingHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "ancestor-sibling:Empty", options: exactParentChildOptions)
+)
+expect(
+    exactAncestorSiblingHint.canUseDatabaseCandidates &&
+        exactAncestorSiblingHint.ancestorSiblingFilters.first?.value == "Empty",
+    "exact ancestor-sibling: searches should be pushed into SQLite candidate hints"
+)
+
+let exactAncestorSiblingFolderHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "ancestor-sibling-folder:Archive", options: exactParentChildOptions)
+)
+expect(
+    exactAncestorSiblingFolderHint.canUseDatabaseCandidates &&
+        exactAncestorSiblingFolderHint.ancestorSiblingFilters.first?.allowedKinds == Set<FileKind>([.folder, .package]),
+    "exact ancestor-sibling-folder: searches should preserve kind filters in SQLite candidate hints"
 )
 
 let complexHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch | notes"))
@@ -5600,6 +5650,111 @@ do {
     expect(
         Set(parentCountCandidates.map(\.path)) == Set([childInFolder.path, nestedGrandchild.path]),
         "SQLite candidate search should apply parent-count depth aliases"
+    )
+
+    let siblingRelationCandidateDatabaseURL = temporaryDirectory.appending(path: "SiblingRelationCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(
+            rootPath: "/Users/me",
+            entries: [document, folder, emptyFile, childInFolder, childFolderInFolder, nestedGrandchild, auntFolder]
+        ),
+        to: siblingRelationCandidateDatabaseURL
+    )
+    let parentSiblingPresenceCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "parent-sibling:")),
+        limit: 20,
+        from: siblingRelationCandidateDatabaseURL
+    )
+    expect(
+        Set(parentSiblingPresenceCandidates.map(\.path)) ==
+            Set([childInFolder.path, childFolderInFolder.path, nestedGrandchild.path]),
+        "SQLite candidate search should apply parent-sibling presence filters"
+    )
+
+    let exactParentSiblingCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "parent-sibling:Empty", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: siblingRelationCandidateDatabaseURL
+    )
+    expect(
+        Set(exactParentSiblingCandidates.map(\.path)) == Set([childInFolder.path, childFolderInFolder.path]),
+        "SQLite candidate search should apply exact parent-sibling text filters"
+    )
+
+    let exactParentSiblingFileCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "parent-sibling-file:Empty", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: siblingRelationCandidateDatabaseURL
+    )
+    expect(
+        Set(exactParentSiblingFileCandidates.map(\.path)) == Set([childInFolder.path, childFolderInFolder.path]),
+        "SQLite candidate search should apply exact parent-sibling-file filters"
+    )
+
+    let exactParentSiblingFolderCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "parent-sibling-folder:Archive", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: siblingRelationCandidateDatabaseURL
+    )
+    expect(
+        Set(exactParentSiblingFolderCandidates.map(\.path)) == Set([childInFolder.path, childFolderInFolder.path]),
+        "SQLite candidate search should apply exact parent-sibling-folder filters"
+    )
+
+    let ancestorSiblingPresenceCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "ancestor-sibling:")),
+        limit: 20,
+        from: siblingRelationCandidateDatabaseURL
+    )
+    expect(
+        Set(ancestorSiblingPresenceCandidates.map(\.path)) ==
+            Set([childInFolder.path, childFolderInFolder.path, nestedGrandchild.path]),
+        "SQLite candidate search should apply ancestor-sibling presence filters"
+    )
+
+    let exactAncestorSiblingCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "ancestor-sibling:Empty", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: siblingRelationCandidateDatabaseURL
+    )
+    expect(
+        Set(exactAncestorSiblingCandidates.map(\.path)) ==
+            Set([childInFolder.path, childFolderInFolder.path, nestedGrandchild.path]),
+        "SQLite candidate search should apply exact ancestor-sibling text filters"
+    )
+
+    let exactAncestorSiblingFileCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "ancestor-sibling-file:Empty", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: siblingRelationCandidateDatabaseURL
+    )
+    expect(
+        Set(exactAncestorSiblingFileCandidates.map(\.path)) ==
+            Set([childInFolder.path, childFolderInFolder.path, nestedGrandchild.path]),
+        "SQLite candidate search should apply exact ancestor-sibling-file filters"
+    )
+
+    let exactAncestorSiblingFolderCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "ancestor-sibling-folder:Archive", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: siblingRelationCandidateDatabaseURL
+    )
+    expect(
+        Set(exactAncestorSiblingFolderCandidates.map(\.path)) ==
+            Set([childInFolder.path, childFolderInFolder.path, nestedGrandchild.path]),
+        "SQLite candidate search should apply exact ancestor-sibling-folder filters"
     )
 
     let lengthCandidateDatabaseURL = temporaryDirectory.appending(path: "LengthCandidates.db")
