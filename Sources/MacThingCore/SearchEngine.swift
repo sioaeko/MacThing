@@ -543,6 +543,9 @@ public enum SearchCandidateNumericField: String, Sendable {
     case childCount
     case childFileCount
     case childFolderCount
+    case siblingCount
+    case siblingFileCount
+    case siblingFolderCount
 }
 
 public enum SearchCandidateDateField: String, Hashable, Sendable {
@@ -1252,6 +1255,21 @@ public enum SearchEngine {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
                     numericFilters.append(contentsOf: filter.candidateFilters(field: .childFolderCount))
+                case "siblingcount":
+                    guard let filter = ComparisonFilter<Int>.parse(value.isEmpty ? ">0" : value, valueParser: { Int($0) }) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .siblingCount))
+                case "siblingfilecount":
+                    guard let filter = ComparisonFilter<Int>.parse(value.isEmpty ? ">0" : value, valueParser: { Int($0) }) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .siblingFileCount))
+                case "siblingfoldercount":
+                    guard let filter = ComparisonFilter<Int>.parse(value.isEmpty ? ">0" : value, valueParser: { Int($0) }) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .siblingFolderCount))
                 case "track":
                     guard let filter = ComparisonFilter<Int64>.parse(value.isEmpty ? ">0" : value, valueParser: { Int64($0) }) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
@@ -1402,8 +1420,7 @@ public enum SearchEngine {
                      "siblingfiles", "siblingfolder", "siblingfolders",
                      "siblingdir", "siblingdirs", "namefrequency",
                      "extensionfrequency", "pathdupe",
-                     "totalchildsize", "siblingcount",
-                     "siblingfilecount", "siblingfoldercount",
+                     "totalchildsize",
                      "descendant", "descendantname", "descendantfile",
                      "descendantfilename", "descendantfilenames", "descendantfolder",
                      "descendantfoldername", "descendantfoldernames",

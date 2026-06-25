@@ -3347,8 +3347,23 @@ expect(
 
 let siblingCountHint = SearchEngine.candidateHint(for: SearchRequest(query: "sibling-count:>0"))
 expect(
-    siblingCountHint.canUseDatabaseCandidates == false,
-    "sibling-count: searches should avoid lossy SQLite candidate prefiltering"
+    siblingCountHint.canUseDatabaseCandidates &&
+        siblingCountHint.numericFilters.first?.field == .siblingCount,
+    "sibling-count: searches should be pushed into SQLite candidate hints"
+)
+
+let siblingFileCountHint = SearchEngine.candidateHint(for: SearchRequest(query: "sibling-file-count:>0"))
+expect(
+    siblingFileCountHint.canUseDatabaseCandidates &&
+        siblingFileCountHint.numericFilters.first?.field == .siblingFileCount,
+    "sibling-file-count: searches should be pushed into SQLite candidate hints"
+)
+
+let siblingFolderCountHint = SearchEngine.candidateHint(for: SearchRequest(query: "sibling-folder-count:>0"))
+expect(
+    siblingFolderCountHint.canUseDatabaseCandidates &&
+        siblingFolderCountHint.numericFilters.first?.field == .siblingFolderCount,
+    "sibling-folder-count: searches should be pushed into SQLite candidate hints"
 )
 
 let sizeDupeHint = SearchEngine.candidateHint(for: SearchRequest(query: "sizedupe:"))
@@ -5374,6 +5389,41 @@ do {
     expect(
         childFolderCountCandidates.map(\.path) == [folder.path],
         "SQLite candidate search should apply child-folder-count filters"
+    )
+
+    let siblingCountCandidateDatabaseURL = temporaryDirectory.appending(path: "SiblingCountCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: "/Users/me", entries: [document, folder, emptyFile, childInFolder]),
+        to: siblingCountCandidateDatabaseURL
+    )
+    let siblingCountCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "sibling-count:2")),
+        limit: 20,
+        from: siblingCountCandidateDatabaseURL
+    )
+    expect(
+        Set(siblingCountCandidates.map(\.path)) == Set([document.path, folder.path, emptyFile.path]),
+        "SQLite candidate search should apply sibling-count filters"
+    )
+
+    let siblingFileCountCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "sibling-file-count:2")),
+        limit: 20,
+        from: siblingCountCandidateDatabaseURL
+    )
+    expect(
+        siblingFileCountCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply sibling-file-count filters"
+    )
+
+    let siblingFolderCountCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "sibling-folder-count:1")),
+        limit: 20,
+        from: siblingCountCandidateDatabaseURL
+    )
+    expect(
+        Set(siblingFolderCountCandidates.map(\.path)) == Set([document.path, emptyFile.path]),
+        "SQLite candidate search should apply sibling-folder-count filters"
     )
 
     let broadPathFTSDecoys = (0..<25).map { index in

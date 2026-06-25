@@ -743,6 +743,10 @@ private final class SQLiteDatabase {
         tablePrefix.map { "\($0).path" } ?? "entries.path"
     }
 
+    private func outerParentExpression(tablePrefix: String?) -> String {
+        tablePrefix.map { "\($0).parent" } ?? "entries.parent"
+    }
+
     private func emptyEntryFilter(prefix: String, outerPathExpression: String, isEmpty: Bool) -> (clause: String, bindings: [SQLiteValue]) {
         let fileKinds = [FileKind.file, .symlink, .other].map(\.rawValue)
         let containerKinds = [FileKind.folder, .package].map(\.rawValue)
@@ -808,6 +812,12 @@ private final class SQLiteDatabase {
             return childCountExpression(prefix: prefix, tablePrefix: tablePrefix, allowedKinds: [.file, .symlink, .other])
         case .childFolderCount:
             return childCountExpression(prefix: prefix, tablePrefix: tablePrefix, allowedKinds: [.folder, .package])
+        case .siblingCount:
+            return siblingCountExpression(prefix: prefix, tablePrefix: tablePrefix, allowedKinds: nil)
+        case .siblingFileCount:
+            return siblingCountExpression(prefix: prefix, tablePrefix: tablePrefix, allowedKinds: [.file, .symlink, .other])
+        case .siblingFolderCount:
+            return siblingCountExpression(prefix: prefix, tablePrefix: tablePrefix, allowedKinds: [.folder, .package])
         }
     }
 
@@ -824,6 +834,30 @@ private final class SQLiteDatabase {
                 WHEN \(prefix)kind IN ('folder', 'package') THEN
                     (SELECT COUNT(1) FROM entries AS child WHERE \(whereClause))
                 ELSE NULL
+            END)
+            """
+    }
+
+    private func siblingCountExpression(prefix: String, tablePrefix: String?, allowedKinds: [FileKind]?) -> String {
+        let parentExpression = outerParentExpression(tablePrefix: tablePrefix)
+        var whereClause = "sibling.parent = \(parentExpression)"
+        if let allowedKinds {
+            let kinds = allowedKinds.map(\.rawValue).sorted()
+            let quotedKinds = kinds.map { "'\(escapeSQLLiteral($0))'" }.joined(separator: ", ")
+            whereClause += " AND sibling.kind IN (\(quotedKinds))"
+        }
+        let countExpression = "(SELECT COUNT(1) FROM entries AS sibling WHERE \(whereClause))"
+
+        guard let allowedKinds else {
+            return "(\(countExpression) - 1)"
+        }
+
+        let entryKinds = allowedKinds.map(\.rawValue).sorted()
+        let quotedEntryKinds = entryKinds.map { "'\(escapeSQLLiteral($0))'" }.joined(separator: ", ")
+        return """
+            (CASE
+                WHEN \(prefix)kind IN (\(quotedEntryKinds)) THEN \(countExpression) - 1
+                ELSE \(countExpression)
             END)
             """
     }
