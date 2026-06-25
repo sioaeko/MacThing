@@ -3213,6 +3213,32 @@ expect(
     "parent-child: searches should avoid lossy SQLite candidate prefiltering"
 )
 
+let parentChildPresenceHint = SearchEngine.candidateHint(for: SearchRequest(query: "parent-child:"))
+expect(
+    parentChildPresenceHint.canUseDatabaseCandidates &&
+        parentChildPresenceHint.parentChildFilters.first?.value == nil,
+    "parent-child: presence searches should be pushed into SQLite candidate hints"
+)
+
+let exactParentChildOptions = SearchOptions(caseSensitive: true, diacriticSensitive: true)
+let exactParentChildHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "parent-child:Empty", options: exactParentChildOptions)
+)
+expect(
+    exactParentChildHint.canUseDatabaseCandidates &&
+        exactParentChildHint.parentChildFilters.first?.value == "Empty",
+    "exact parent-child: searches should be pushed into SQLite candidate hints"
+)
+
+let exactParentChildFolderHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "parent-child-folder:Launch", options: exactParentChildOptions)
+)
+expect(
+    exactParentChildFolderHint.canUseDatabaseCandidates &&
+        exactParentChildFolderHint.parentChildFilters.first?.allowedKinds == Set<FileKind>([.folder, .package]),
+    "exact parent-child-folder: searches should preserve kind filters in SQLite candidate hints"
+)
+
 let parentSiblingHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch parent-sibling:Empty"))
 expect(
     parentSiblingHint.canUseDatabaseCandidates == false,
@@ -5898,6 +5924,58 @@ do {
     expect(
         Set(ancestorExcludedAttributeCandidates.map(\.path)) == Set([childFolderInFolder.path, nestedGrandchild.path]),
         "SQLite candidate search should apply negative ancestor-attr filters"
+    )
+
+    let parentChildCandidateDatabaseURL = temporaryDirectory.appending(path: "ParentChildCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: "/Users/me", entries: [document, folder, emptyFile, childInFolder]),
+        to: parentChildCandidateDatabaseURL
+    )
+    let parentChildPresenceCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "parent-child:")),
+        limit: 20,
+        from: parentChildCandidateDatabaseURL
+    )
+    expect(
+        Set(parentChildPresenceCandidates.map(\.path)) ==
+            Set([document.path, folder.path, emptyFile.path, childInFolder.path]),
+        "SQLite candidate search should apply parent-child presence filters"
+    )
+
+    let exactParentChildCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "parent-child:Empty", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: parentChildCandidateDatabaseURL
+    )
+    expect(
+        Set(exactParentChildCandidates.map(\.path)) == Set([document.path, folder.path, emptyFile.path]),
+        "SQLite candidate search should apply exact parent-child text filters"
+    )
+
+    let exactParentChildSelfCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "parent-child:Child", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: parentChildCandidateDatabaseURL
+    )
+    expect(
+        exactParentChildSelfCandidates.map(\.path) == [childInFolder.path],
+        "SQLite parent-child filters should include the entry itself as one of its parent's children"
+    )
+
+    let exactParentChildFolderCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "parent-child-folder:Launch", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: parentChildCandidateDatabaseURL
+    )
+    expect(
+        Set(exactParentChildFolderCandidates.map(\.path)) == Set([document.path, folder.path, emptyFile.path]),
+        "SQLite candidate search should apply exact parent-child-folder filters"
     )
 
     let siblingCountCandidateDatabaseURL = temporaryDirectory.appending(path: "SiblingCountCandidates.db")

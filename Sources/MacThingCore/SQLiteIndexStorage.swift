@@ -792,6 +792,15 @@ private final class SQLiteDatabase {
             bindings.append(contentsOf: ancestorFilter.bindings)
         }
 
+        for filter in hint.parentChildFilters {
+            let parentChildFilter = parentChildFilterClause(
+                tablePrefix: tablePrefix,
+                filter: filter
+            )
+            clauses.append(parentChildFilter.clause)
+            bindings.append(contentsOf: parentChildFilter.bindings)
+        }
+
         if let filter = hint.fileReferenceFilter {
             if let fileID = filter.fileID, !fileID.isEmpty {
                 clauses.append("LOWER(\(prefix)file_id) = ?")
@@ -1212,6 +1221,43 @@ private final class SQLiteDatabase {
                 SELECT 1
                 FROM entries AS parent_entry
                 WHERE \(parentClauses.joined(separator: " AND "))
+                LIMIT 1
+            )
+            """
+        return (clause, bindings)
+    }
+
+    private func parentChildFilterClause(
+        tablePrefix: String?,
+        filter: SearchCandidateParentChildFilter
+    ) -> (clause: String, bindings: [SQLiteValue]) {
+        let parentExpression = outerParentExpression(tablePrefix: tablePrefix)
+        var childClauses = ["child.parent = \(parentExpression)"]
+        var bindings: [SQLiteValue] = []
+
+        if let allowedKinds = filter.allowedKinds {
+            let kinds = allowedKinds.map(\.rawValue).sorted()
+            childClauses.append("child.kind IN (\(placeholders(count: kinds.count)))")
+            bindings.append(contentsOf: kinds.map(SQLiteValue.text))
+        }
+
+        if let value = filter.value, !value.isEmpty {
+            var matchClauses = ["instr(child.name, ?) > 0"]
+            bindings.append(.text(value))
+
+            if filter.searchesPath {
+                matchClauses.append("instr(child.path, ?) > 0")
+                bindings.append(.text(value))
+            }
+
+            childClauses.append("(\(matchClauses.joined(separator: " OR ")))")
+        }
+
+        let clause = """
+            EXISTS (
+                SELECT 1
+                FROM entries AS child
+                WHERE \(childClauses.joined(separator: " AND "))
                 LIMIT 1
             )
             """
