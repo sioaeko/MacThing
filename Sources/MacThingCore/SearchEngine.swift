@@ -609,6 +609,16 @@ public struct SearchCandidateFileReferenceFilter: Sendable {
     }
 }
 
+public struct SearchCandidateChildSizeFilter: Sendable {
+    public let allowedKinds: Set<FileKind>?
+    public let filters: [SearchCandidateNumericFilter]
+
+    public init(allowedKinds: Set<FileKind>?, filters: [SearchCandidateNumericFilter]) {
+        self.allowedKinds = allowedKinds
+        self.filters = filters
+    }
+}
+
 public struct SearchCandidateHint: Sendable {
     public let terms: [String]
     public let canUseDatabaseCandidates: Bool
@@ -621,6 +631,7 @@ public struct SearchCandidateHint: Sendable {
     public let dateFilters: [SearchCandidateDateFilter]
     public let unknownDateFields: Set<SearchCandidateDateField>
     public let mediaTextFilters: [SearchCandidateMediaTextFilter]
+    public let childSizeFilters: [SearchCandidateChildSizeFilter]
     public let fileReferenceFilter: SearchCandidateFileReferenceFilter?
     public let requiresFileListSource: Bool
     public let rootOnly: Bool
@@ -640,6 +651,7 @@ public struct SearchCandidateHint: Sendable {
         dateFilters: [SearchCandidateDateFilter] = [],
         unknownDateFields: Set<SearchCandidateDateField> = [],
         mediaTextFilters: [SearchCandidateMediaTextFilter] = [],
+        childSizeFilters: [SearchCandidateChildSizeFilter] = [],
         fileReferenceFilter: SearchCandidateFileReferenceFilter? = nil,
         requiresFileListSource: Bool = false,
         rootOnly: Bool = false,
@@ -658,6 +670,7 @@ public struct SearchCandidateHint: Sendable {
         self.dateFilters = dateFilters
         self.unknownDateFields = unknownDateFields
         self.mediaTextFilters = mediaTextFilters
+        self.childSizeFilters = childSizeFilters
         self.fileReferenceFilter = fileReferenceFilter
         self.requiresFileListSource = requiresFileListSource
         self.rootOnly = rootOnly
@@ -676,6 +689,7 @@ public struct SearchCandidateHint: Sendable {
             !dateFilters.isEmpty ||
             !unknownDateFields.isEmpty ||
             !mediaTextFilters.isEmpty ||
+            !childSizeFilters.isEmpty ||
             fileReferenceFilter != nil ||
             requiresFileListSource ||
             rootOnly ||
@@ -868,6 +882,7 @@ public enum SearchEngine {
         var dateFilters: [SearchCandidateDateFilter] = []
         var unknownDateFields = Set<SearchCandidateDateField>()
         var mediaTextFilters: [SearchCandidateMediaTextFilter] = []
+        var childSizeFilters: [SearchCandidateChildSizeFilter] = []
         var fileReferenceFilter: SearchCandidateFileReferenceFilter?
         var requiresFileListSource = false
         var rootOnly = false
@@ -1276,6 +1291,33 @@ public enum SearchEngine {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
                     numericFilters.append(contentsOf: filter.candidateFilters(field: .siblingFolderCount))
+                case "childsize":
+                    guard let filter = ComparisonFilter<Int64>.parse(value, valueParser: parseByteSize) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    childSizeFilters.append(
+                        SearchCandidateChildSizeFilter(allowedKinds: nil, filters: filter.candidateFilters(field: .byteSize))
+                    )
+                case "childfilesize":
+                    guard let filter = ComparisonFilter<Int64>.parse(value, valueParser: parseByteSize) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    childSizeFilters.append(
+                        SearchCandidateChildSizeFilter(
+                            allowedKinds: [.file, .symlink, .other],
+                            filters: filter.candidateFilters(field: .byteSize)
+                        )
+                    )
+                case "childfoldersize":
+                    guard let filter = ComparisonFilter<Int64>.parse(value, valueParser: parseByteSize) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    childSizeFilters.append(
+                        SearchCandidateChildSizeFilter(
+                            allowedKinds: [.folder, .package],
+                            filters: filter.candidateFilters(field: .byteSize)
+                        )
+                    )
                 case "track":
                     guard let filter = ComparisonFilter<Int64>.parse(value.isEmpty ? ">0" : value, valueParser: { Int64($0) }) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
@@ -1420,8 +1462,7 @@ public enum SearchEngine {
                      "childfilerc", "childfiledaterecentlychanged", "childfolderrc",
                      "childfolderdaterecentlychanged", "childdaterun",
                      "childfiledaterun", "childfolderdaterun", "childruncount",
-                     "childfileruncount", "childfolderruncount", "childsize",
-                     "childfilesize", "childfoldersize", "childfilelist",
+                     "childfileruncount", "childfolderruncount", "childfilelist",
                      "sibling", "siblingname", "siblingfile",
                      "siblingfiles", "siblingfolder", "siblingfolders",
                      "siblingdir", "siblingdirs", "namefrequency",
@@ -1468,6 +1509,7 @@ public enum SearchEngine {
             !dateFilters.isEmpty ||
             !unknownDateFields.isEmpty ||
             !mediaTextFilters.isEmpty ||
+            !childSizeFilters.isEmpty ||
             fileReferenceFilter != nil ||
             requiresFileListSource ||
             rootOnly ||
@@ -1486,6 +1528,7 @@ public enum SearchEngine {
             dateFilters: dateFilters,
             unknownDateFields: unknownDateFields,
             mediaTextFilters: mediaTextFilters,
+            childSizeFilters: childSizeFilters,
             fileReferenceFilter: fileReferenceFilter,
             requiresFileListSource: requiresFileListSource,
             rootOnly: rootOnly,

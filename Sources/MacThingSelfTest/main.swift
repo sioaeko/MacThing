@@ -3330,8 +3330,27 @@ expect(
 
 let childSizeHint = SearchEngine.candidateHint(for: SearchRequest(query: "child-size:>1kb"))
 expect(
-    childSizeHint.canUseDatabaseCandidates == false,
-    "child-size: searches should avoid lossy SQLite candidate prefiltering"
+    childSizeHint.canUseDatabaseCandidates &&
+        childSizeHint.childSizeFilters.count == 1,
+    "child-size: searches should be pushed into SQLite candidate hints"
+)
+
+let childFileSizeHint = SearchEngine.candidateHint(for: SearchRequest(query: "child-file-size:>1kb"))
+expect(
+    childFileSizeHint.canUseDatabaseCandidates &&
+        childFileSizeHint.childSizeFilters.contains {
+            $0.allowedKinds == Set<FileKind>([.file, .symlink, .other])
+        },
+    "child-file-size: searches should be pushed into SQLite candidate hints"
+)
+
+let childFolderSizeHint = SearchEngine.candidateHint(for: SearchRequest(query: "child-folder-size:>1kb"))
+expect(
+    childFolderSizeHint.canUseDatabaseCandidates &&
+        childFolderSizeHint.childSizeFilters.contains {
+            $0.allowedKinds == Set<FileKind>([.folder, .package])
+        },
+    "child-folder-size: searches should be pushed into SQLite candidate hints"
 )
 
 let childFileListHint = SearchEngine.candidateHint(for: SearchRequest(query: "child-file-list:Metadata.bin"))
@@ -5420,6 +5439,51 @@ do {
     expect(
         zeroTotalChildSizeCandidates.isEmpty,
         "SQLite total-child-size filters should not treat non-containers as zero-size containers"
+    )
+
+    let childSizeCandidateDatabaseURL = temporaryDirectory.appending(path: "ChildSizeCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: "/Users/me", entries: [document, folder, childMetadataFile, childMetadataFolder]),
+        to: childSizeCandidateDatabaseURL
+    )
+    let childSizeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "child-size:2048")),
+        limit: 20,
+        from: childSizeCandidateDatabaseURL
+    )
+    expect(
+        childSizeCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply child-size filters"
+    )
+
+    let childSizeRangeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "child-size:2kb..3kb")),
+        limit: 20,
+        from: childSizeCandidateDatabaseURL
+    )
+    expect(
+        childSizeRangeCandidates.map(\.path) == [folder.path],
+        "SQLite child-size range filters should apply comparisons to the same direct child"
+    )
+
+    let childFileSizeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "child-file-size:2048")),
+        limit: 20,
+        from: childSizeCandidateDatabaseURL
+    )
+    expect(
+        childFileSizeCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply child-file-size filters"
+    )
+
+    let childFolderSizeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "child-folder-size:4096")),
+        limit: 20,
+        from: childSizeCandidateDatabaseURL
+    )
+    expect(
+        childFolderSizeCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply child-folder-size filters"
     )
 
     let siblingCountCandidateDatabaseURL = temporaryDirectory.appending(path: "SiblingCountCandidates.db")
