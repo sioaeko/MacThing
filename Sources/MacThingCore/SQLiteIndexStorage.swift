@@ -663,6 +663,12 @@ private final class SQLiteDatabase {
             bindings.append(contentsOf: parentPaths.map { .text($0) })
         }
 
+        for filter in hint.pathListFilters where !filter.paths.isEmpty {
+            let paths = filter.paths.sorted()
+            clauses.append("\(prefix)path IN (\(placeholders(count: paths.count)))")
+            bindings.append(contentsOf: paths.map { .text($0) })
+        }
+
         if !hint.requiredAttributes.isEmpty {
             let rawValue = Int64(hint.requiredAttributes.rawValue)
             clauses.append("(\(prefix)attributes & ?) = ?")

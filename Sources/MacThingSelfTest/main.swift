@@ -3865,6 +3865,37 @@ expect(
     "path-list: searches should avoid lossy SQLite candidate prefiltering"
 )
 
+let exactPathListHint = SearchEngine.candidateHint(
+    for: SearchRequest(
+        query: "path-list:/Users/me/Pictures/Launch.JPG",
+        options: exactParentChildOptions
+    )
+)
+expect(
+    exactPathListHint.canUseDatabaseCandidates &&
+        exactPathListHint.pathListFilters.first?.paths == Set(["/Users/me/Pictures/Launch.JPG"]),
+    "exact path-list: searches should be pushed into SQLite candidate hints"
+)
+
+let exactListedPathListHint = SearchEngine.candidateHint(
+    for: SearchRequest(
+        query: "path-list:/Users/me/Pictures/Launch.JPG;/Users/me/Documents/Launch",
+        options: exactParentChildOptions
+    )
+)
+expect(
+    exactListedPathListHint.canUseDatabaseCandidates == false,
+    "semicolon path-list: searches should avoid lossy SQLite candidate prefiltering"
+)
+
+let substitutionPathListHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "path-list:$path:", options: exactParentChildOptions)
+)
+expect(
+    substitutionPathListHint.canUseDatabaseCandidates == false,
+    "substituted path-list: searches should avoid lossy SQLite candidate prefiltering"
+)
+
 let nothingHint = SearchEngine.candidateHint(for: SearchRequest(query: "nothing:"))
 expect(
     nothingHint.canUseDatabaseCandidates == false,
@@ -5733,6 +5764,41 @@ do {
     expect(
         Set(folderExistsCandidates.map(\.path)) == Set([matchingFolderFile.path, matchingFolder.path]),
         "SQLite candidate search should apply exact folder-exists filters"
+    )
+
+    let pathListCandidateDatabaseURL = temporaryDirectory.appending(path: "PathListCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: "/", entries: [rootLevelEntry, pathMatch, deepPathMatch, photo]),
+        to: pathListCandidateDatabaseURL
+    )
+    let exactPathListCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(
+                query: "path-list:/Users/me/project/archive/readme.txt",
+                options: exactParentChildOptions
+            )
+        ),
+        limit: 20,
+        from: pathListCandidateDatabaseURL
+    )
+    expect(
+        exactPathListCandidates.map(\.path) == [pathMatch.path],
+        "SQLite candidate search should apply exact path-list filters"
+    )
+
+    let exactFullPathListCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(
+                query: "full-path-list:/Users/me/project/archive/deep/readme.txt",
+                options: exactParentChildOptions
+            )
+        ),
+        limit: 20,
+        from: pathListCandidateDatabaseURL
+    )
+    expect(
+        exactFullPathListCandidates.map(\.path) == [deepPathMatch.path],
+        "SQLite candidate search should apply exact full-path-list filters"
     )
 
     let siblingRelationCandidateDatabaseURL = temporaryDirectory.appending(path: "SiblingRelationCandidates.db")

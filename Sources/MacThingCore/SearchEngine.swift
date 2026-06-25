@@ -790,6 +790,14 @@ public struct SearchCandidateAncestorSiblingFilter: Sendable {
     }
 }
 
+public struct SearchCandidatePathListFilter: Sendable {
+    public let paths: Set<String>
+
+    public init(paths: Set<String>) {
+        self.paths = paths
+    }
+}
+
 public struct SearchCandidateHint: Sendable {
     public let terms: [String]
     public let canUseDatabaseCandidates: Bool
@@ -818,6 +826,7 @@ public struct SearchCandidateHint: Sendable {
     public let parentSiblingFilters: [SearchCandidateParentSiblingFilter]
     public let ancestorSiblingFilters: [SearchCandidateAncestorSiblingFilter]
     public let existsFilters: [SearchCandidateExistsFilter]
+    public let pathListFilters: [SearchCandidatePathListFilter]
     public let fileReferenceFilter: SearchCandidateFileReferenceFilter?
     public let requiresFileListSource: Bool
     public let rootOnly: Bool
@@ -853,6 +862,7 @@ public struct SearchCandidateHint: Sendable {
         parentSiblingFilters: [SearchCandidateParentSiblingFilter] = [],
         ancestorSiblingFilters: [SearchCandidateAncestorSiblingFilter] = [],
         existsFilters: [SearchCandidateExistsFilter] = [],
+        pathListFilters: [SearchCandidatePathListFilter] = [],
         fileReferenceFilter: SearchCandidateFileReferenceFilter? = nil,
         requiresFileListSource: Bool = false,
         rootOnly: Bool = false,
@@ -887,6 +897,7 @@ public struct SearchCandidateHint: Sendable {
         self.parentSiblingFilters = parentSiblingFilters
         self.ancestorSiblingFilters = ancestorSiblingFilters
         self.existsFilters = existsFilters
+        self.pathListFilters = pathListFilters
         self.fileReferenceFilter = fileReferenceFilter
         self.requiresFileListSource = requiresFileListSource
         self.rootOnly = rootOnly
@@ -921,6 +932,7 @@ public struct SearchCandidateHint: Sendable {
             !parentSiblingFilters.isEmpty ||
             !ancestorSiblingFilters.isEmpty ||
             !existsFilters.isEmpty ||
+            !pathListFilters.isEmpty ||
             fileReferenceFilter != nil ||
             requiresFileListSource ||
             rootOnly ||
@@ -1129,6 +1141,7 @@ public enum SearchEngine {
         var parentSiblingFilters: [SearchCandidateParentSiblingFilter] = []
         var ancestorSiblingFilters: [SearchCandidateAncestorSiblingFilter] = []
         var existsFilters: [SearchCandidateExistsFilter] = []
+        var pathListFilters: [SearchCandidatePathListFilter] = []
         var fileReferenceFilter: SearchCandidateFileReferenceFilter?
         var requiresFileListSource = false
         var rootOnly = false
@@ -1504,6 +1517,22 @@ public enum SearchEngine {
                     )
                 )
             }
+            return true
+        }
+
+        func addPathListCandidateHint(rawValue: String) -> Bool {
+            let values = parseDelimitedList(rawValue)
+            guard !values.isEmpty else {
+                return true
+            }
+            guard request.options.caseSensitive,
+                  request.options.diacriticSensitive,
+                  values.allSatisfy({ !$0.contains("$") }) else {
+                return false
+            }
+
+            let paths = Set(values.map { normalizedFolderPath($0.replacingOccurrences(of: "\\", with: "/")) })
+            pathListFilters.append(SearchCandidatePathListFilter(paths: paths))
             return true
         }
 
@@ -2122,6 +2151,10 @@ public enum SearchEngine {
                     guard addExistsCandidateHint(value: value, allowedKinds: [.folder, .package]) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
+                case "pathlist", "fullpathlist":
+                    guard addPathListCandidateHint(rawValue: rawValue) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
                 case "child", "childname":
                     guard addChildTextCandidateHint(value: value, allowedKinds: nil) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
@@ -2186,7 +2219,6 @@ public enum SearchEngine {
                      "regex", "dupe", "dupename", "nothing",
                      "namefrequency",
                      "extensionfrequency", "pathdupe",
-                     "pathlist", "fullpathlist",
                      "namepartdupe", "sizedupe",
                      "attribdupe", "attrdupe", "dadupe", "dcdupe",
                      "dmdupe", "filelist", "fsi",
@@ -2229,6 +2261,7 @@ public enum SearchEngine {
             !parentSiblingFilters.isEmpty ||
             !ancestorSiblingFilters.isEmpty ||
             !existsFilters.isEmpty ||
+            !pathListFilters.isEmpty ||
             fileReferenceFilter != nil ||
             requiresFileListSource ||
             rootOnly ||
@@ -2263,6 +2296,7 @@ public enum SearchEngine {
             parentSiblingFilters: parentSiblingFilters,
             ancestorSiblingFilters: ancestorSiblingFilters,
             existsFilters: existsFilters,
+            pathListFilters: pathListFilters,
             fileReferenceFilter: fileReferenceFilter,
             requiresFileListSource: requiresFileListSource,
             rootOnly: rootOnly,
