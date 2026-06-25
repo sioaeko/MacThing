@@ -684,6 +684,16 @@ public struct SearchCandidateParentSizeFilter: Sendable {
     }
 }
 
+public struct SearchCandidateAncestorAttributeFilter: Sendable {
+    public let requiredAttributes: FileAttributes
+    public let excludedAttributes: FileAttributes
+
+    public init(requiredAttributes: FileAttributes, excludedAttributes: FileAttributes) {
+        self.requiredAttributes = requiredAttributes
+        self.excludedAttributes = excludedAttributes
+    }
+}
+
 public struct SearchCandidateHint: Sendable {
     public let terms: [String]
     public let canUseDatabaseCandidates: Bool
@@ -703,6 +713,7 @@ public struct SearchCandidateHint: Sendable {
     public let childFileListFilters: [SearchCandidateChildFileListFilter]
     public let parentDateFilters: [SearchCandidateParentDateFilter]
     public let parentSizeFilters: [SearchCandidateParentSizeFilter]
+    public let ancestorAttributeFilters: [SearchCandidateAncestorAttributeFilter]
     public let fileReferenceFilter: SearchCandidateFileReferenceFilter?
     public let requiresFileListSource: Bool
     public let rootOnly: Bool
@@ -729,6 +740,7 @@ public struct SearchCandidateHint: Sendable {
         childFileListFilters: [SearchCandidateChildFileListFilter] = [],
         parentDateFilters: [SearchCandidateParentDateFilter] = [],
         parentSizeFilters: [SearchCandidateParentSizeFilter] = [],
+        ancestorAttributeFilters: [SearchCandidateAncestorAttributeFilter] = [],
         fileReferenceFilter: SearchCandidateFileReferenceFilter? = nil,
         requiresFileListSource: Bool = false,
         rootOnly: Bool = false,
@@ -754,6 +766,7 @@ public struct SearchCandidateHint: Sendable {
         self.childFileListFilters = childFileListFilters
         self.parentDateFilters = parentDateFilters
         self.parentSizeFilters = parentSizeFilters
+        self.ancestorAttributeFilters = ancestorAttributeFilters
         self.fileReferenceFilter = fileReferenceFilter
         self.requiresFileListSource = requiresFileListSource
         self.rootOnly = rootOnly
@@ -779,6 +792,7 @@ public struct SearchCandidateHint: Sendable {
             !childFileListFilters.isEmpty ||
             !parentDateFilters.isEmpty ||
             !parentSizeFilters.isEmpty ||
+            !ancestorAttributeFilters.isEmpty ||
             fileReferenceFilter != nil ||
             requiresFileListSource ||
             rootOnly ||
@@ -978,6 +992,7 @@ public enum SearchEngine {
         var childFileListFilters: [SearchCandidateChildFileListFilter] = []
         var parentDateFilters: [SearchCandidateParentDateFilter] = []
         var parentSizeFilters: [SearchCandidateParentSizeFilter] = []
+        var ancestorAttributeFilters: [SearchCandidateAncestorAttributeFilter] = []
         var fileReferenceFilter: SearchCandidateFileReferenceFilter?
         var requiresFileListSource = false
         var rootOnly = false
@@ -1715,6 +1730,16 @@ public enum SearchEngine {
                     childFileListFilters.append(
                         SearchCandidateChildFileListFilter(nameValues: nameValues, pathValues: pathValues)
                     )
+                case "ancestorattr", "ancestorattrib", "ancestorattribute", "ancestorattributes":
+                    guard let filter = AttributeFilter.parse(value) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    ancestorAttributeFilters.append(
+                        SearchCandidateAncestorAttributeFilter(
+                            requiredAttributes: filter.required,
+                            excludedAttributes: filter.excluded
+                        )
+                    )
                 case "title", "artist", "album", "comment", "genre":
                     guard let field = mediaTextField(for: function) else {
                         continue
@@ -1752,8 +1777,7 @@ public enum SearchEngine {
                      "descendantfilename", "descendantfilenames", "descendantfolder",
                      "descendantfoldername", "descendantfoldernames",
                      "descendantdir", "descendantdirname", "descendantdirs",
-                     "descendantdirnames", "ancestorattr", "ancestorattrib",
-                     "ancestorattribute", "ancestorattributes",
+                     "descendantdirnames",
                      "ancestorchild", "ancestorchildfile", "ancestorchildfolder",
                      "pathlist", "fullpathlist",
                      "parentchild", "parentchildname", "parentchildfile",
@@ -1794,6 +1818,7 @@ public enum SearchEngine {
             !childFileListFilters.isEmpty ||
             !parentDateFilters.isEmpty ||
             !parentSizeFilters.isEmpty ||
+            !ancestorAttributeFilters.isEmpty ||
             fileReferenceFilter != nil ||
             requiresFileListSource ||
             rootOnly ||
@@ -1819,6 +1844,7 @@ public enum SearchEngine {
             childFileListFilters: childFileListFilters,
             parentDateFilters: parentDateFilters,
             parentSizeFilters: parentSizeFilters,
+            ancestorAttributeFilters: ancestorAttributeFilters,
             fileReferenceFilter: fileReferenceFilter,
             requiresFileListSource: requiresFileListSource,
             rootOnly: rootOnly,

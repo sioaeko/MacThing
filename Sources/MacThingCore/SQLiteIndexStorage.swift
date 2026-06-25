@@ -783,6 +783,15 @@ private final class SQLiteDatabase {
             bindings.append(contentsOf: parentFilter.bindings)
         }
 
+        for filter in hint.ancestorAttributeFilters {
+            let ancestorFilter = ancestorAttributeFilterClause(
+                tablePrefix: tablePrefix,
+                filter: filter
+            )
+            clauses.append(ancestorFilter.clause)
+            bindings.append(contentsOf: ancestorFilter.bindings)
+        }
+
         if let filter = hint.fileReferenceFilter {
             if let fileID = filter.fileID, !fileID.isEmpty {
                 clauses.append("LOWER(\(prefix)file_id) = ?")
@@ -1205,6 +1214,50 @@ private final class SQLiteDatabase {
                 WHERE \(parentClauses.joined(separator: " AND "))
                 LIMIT 1
             )
+            """
+        return (clause, bindings)
+    }
+
+    private func ancestorAttributeFilterClause(
+        tablePrefix: String?,
+        filter: SearchCandidateAncestorAttributeFilter
+    ) -> (clause: String, bindings: [SQLiteValue]) {
+        let parentExpression = outerParentExpression(tablePrefix: tablePrefix)
+        var attributeClauses: [String] = []
+        var bindings: [SQLiteValue] = []
+
+        if !filter.requiredAttributes.isEmpty {
+            let rawValue = Int64(filter.requiredAttributes.rawValue)
+            attributeClauses.append("(ancestor_attributes & ?) = ?")
+            bindings.append(.int(rawValue))
+            bindings.append(.int(rawValue))
+        }
+
+        if !filter.excludedAttributes.isEmpty {
+            attributeClauses.append("(ancestor_attributes & ?) = 0")
+            bindings.append(.int(Int64(filter.excludedAttributes.rawValue)))
+        }
+
+        guard !attributeClauses.isEmpty else {
+            return ("0", [])
+        }
+
+        let clause = """
+            (
+                WITH RECURSIVE ancestor_tree(ancestor_path, ancestor_parent, ancestor_attributes) AS (
+                    SELECT ancestor.path, ancestor.parent, ancestor.attributes
+                    FROM entries AS ancestor
+                    WHERE ancestor.path = \(parentExpression)
+                    UNION
+                    SELECT next_ancestor.path, next_ancestor.parent, next_ancestor.attributes
+                    FROM entries AS next_ancestor
+                    JOIN ancestor_tree
+                        ON next_ancestor.path = ancestor_tree.ancestor_parent
+                )
+                SELECT COUNT(1)
+                FROM ancestor_tree
+                WHERE \(attributeClauses.joined(separator: " AND "))
+            ) > 0
             """
         return (clause, bindings)
     }

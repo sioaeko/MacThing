@@ -3325,8 +3325,16 @@ expect(
 
 let ancestorAttributeHint = SearchEngine.candidateHint(for: SearchRequest(query: "ancestor-attr:h"))
 expect(
-    ancestorAttributeHint.canUseDatabaseCandidates == false,
-    "ancestor-attr: searches should avoid lossy SQLite candidate prefiltering"
+    ancestorAttributeHint.canUseDatabaseCandidates &&
+        ancestorAttributeHint.ancestorAttributeFilters.first?.requiredAttributes == .hidden,
+    "ancestor-attr: searches should be pushed into SQLite candidate hints"
+)
+
+let excludedAncestorAttributeHint = SearchEngine.candidateHint(for: SearchRequest(query: "ancestor-attr:!h"))
+expect(
+    excludedAncestorAttributeHint.canUseDatabaseCandidates &&
+        excludedAncestorAttributeHint.ancestorAttributeFilters.first?.excludedAttributes == .hidden,
+    "negative ancestor-attr: searches should be pushed into SQLite candidate hints"
 )
 
 let ancestorChildHint = SearchEngine.candidateHint(for: SearchRequest(query: "ancestor-child-file:Child"))
@@ -5851,6 +5859,45 @@ do {
     expect(
         childFolderAttributeCandidates.map(\.path) == [folder.path],
         "SQLite candidate search should apply child-folder-attr filters"
+    )
+
+    let ancestorAttributeCandidateDatabaseURL = temporaryDirectory.appending(path: "AncestorAttributeCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(
+            rootPath: "/Users/me",
+            entries: [folder, childFolderInFolder, nestedGrandchild, hiddenAncestorFolder, childUnderHiddenAncestor]
+        ),
+        to: ancestorAttributeCandidateDatabaseURL
+    )
+    let ancestorDirectoryAttributeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "ancestor-attr:d")),
+        limit: 20,
+        from: ancestorAttributeCandidateDatabaseURL
+    )
+    expect(
+        Set(ancestorDirectoryAttributeCandidates.map(\.path)) ==
+            Set([childFolderInFolder.path, nestedGrandchild.path, childUnderHiddenAncestor.path]),
+        "SQLite candidate search should apply ancestor-attr filters through indexed parent chains"
+    )
+
+    let ancestorHiddenAttributeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "ancestor-attribute:h")),
+        limit: 20,
+        from: ancestorAttributeCandidateDatabaseURL
+    )
+    expect(
+        ancestorHiddenAttributeCandidates.map(\.path) == [childUnderHiddenAncestor.path],
+        "SQLite candidate search should apply ancestor-attribute aliases"
+    )
+
+    let ancestorExcludedAttributeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "ancestor-attr:!h")),
+        limit: 20,
+        from: ancestorAttributeCandidateDatabaseURL
+    )
+    expect(
+        Set(ancestorExcludedAttributeCandidates.map(\.path)) == Set([childFolderInFolder.path, nestedGrandchild.path]),
+        "SQLite candidate search should apply negative ancestor-attr filters"
     )
 
     let siblingCountCandidateDatabaseURL = temporaryDirectory.appending(path: "SiblingCountCandidates.db")
