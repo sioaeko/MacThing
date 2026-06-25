@@ -1053,6 +1053,41 @@ private final class SQLiteDatabase {
             return nameFrequencyExpression(tablePrefix: tablePrefix)
         case .extensionFrequency:
             return extensionFrequencyExpression(prefix: prefix, tablePrefix: tablePrefix)
+        case .byteSizeFrequency:
+            return valueFrequencyExpression(
+                tablePrefix: tablePrefix,
+                column: "byte_size",
+                alias: "same_size",
+                allowNullMatch: false
+            )
+        case .createdDateFrequency:
+            return valueFrequencyExpression(
+                tablePrefix: tablePrefix,
+                column: "created_at",
+                alias: "same_created",
+                allowNullMatch: false
+            )
+        case .modifiedDateFrequency:
+            return valueFrequencyExpression(
+                tablePrefix: tablePrefix,
+                column: "modified_at",
+                alias: "same_modified",
+                allowNullMatch: false
+            )
+        case .accessedDateFrequency:
+            return valueFrequencyExpression(
+                tablePrefix: tablePrefix,
+                column: "accessed_at",
+                alias: "same_accessed",
+                allowNullMatch: false
+            )
+        case .attributeFrequency:
+            return valueFrequencyExpression(
+                tablePrefix: tablePrefix,
+                column: "attributes",
+                alias: "same_attributes",
+                allowNullMatch: true
+            )
         case .childCount:
             return childCountExpression(prefix: prefix, tablePrefix: tablePrefix, allowedKinds: nil)
         case .childFileCount:
@@ -1094,6 +1129,23 @@ private final class SQLiteDatabase {
                     )
                 ELSE NULL
             END)
+            """
+    }
+
+    private func valueFrequencyExpression(
+        tablePrefix: String?,
+        column: String,
+        alias: String,
+        allowNullMatch: Bool
+    ) -> String {
+        let valueExpression = tablePrefix.map { "\($0).\(column)" } ?? "entries.\(column)"
+        let nullGuard = allowNullMatch ? "" : "\(valueExpression) IS NOT NULL AND "
+        return """
+            (
+                SELECT COUNT(1)
+                FROM entries AS \(alias)
+                WHERE \(nullGuard)\(alias).\(column) = \(valueExpression)
+            )
             """
     }
 

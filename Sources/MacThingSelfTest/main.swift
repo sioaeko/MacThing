@@ -3680,8 +3680,31 @@ expect(
 
 let sizeDupeHint = SearchEngine.candidateHint(for: SearchRequest(query: "sizedupe:"))
 expect(
-    sizeDupeHint.canUseDatabaseCandidates == false,
-    "duplicate-metric searches should avoid lossy SQLite candidate prefiltering"
+    sizeDupeHint.canUseDatabaseCandidates &&
+        sizeDupeHint.numericFilters.first?.field == .byteSizeFrequency,
+    "size duplicate searches should be pushed into SQLite candidate hints"
+)
+
+let uniqueSizeHint = SearchEngine.candidateHint(for: SearchRequest(query: "sizedupe:0"))
+expect(
+    uniqueSizeHint.canUseDatabaseCandidates &&
+        uniqueSizeHint.numericFilters.first?.field == .byteSizeFrequency &&
+        uniqueSizeHint.numericFilters.first?.op == .lessThanOrEqual,
+    "unique size searches should be pushed into SQLite candidate hints"
+)
+
+let modifiedDupeHint = SearchEngine.candidateHint(for: SearchRequest(query: "dmdupe:"))
+expect(
+    modifiedDupeHint.canUseDatabaseCandidates &&
+        modifiedDupeHint.numericFilters.first?.field == .modifiedDateFrequency,
+    "modified-date duplicate searches should be pushed into SQLite candidate hints"
+)
+
+let attributeDupeHint = SearchEngine.candidateHint(for: SearchRequest(query: "attribdupe:"))
+expect(
+    attributeDupeHint.canUseDatabaseCandidates &&
+        attributeDupeHint.numericFilters.first?.field == .attributeFrequency,
+    "attribute duplicate searches should be pushed into SQLite candidate hints"
 )
 
 let nameFrequencyHint = SearchEngine.candidateHint(for: SearchRequest(query: "name-frequency:>1"))
@@ -6798,6 +6821,71 @@ do {
     expect(
         notEqualLaunchCandidates.map(\.path) == [photo.path],
         "SQLite candidate search should apply not-equal size filters"
+    )
+
+    let duplicateMetricCandidateDatabaseURL = temporaryDirectory.appending(path: "DuplicateMetricCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: "/Users/me", entries: duplicateMetricEntries + [folder]),
+        to: duplicateMetricCandidateDatabaseURL
+    )
+    let duplicateSizeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "sizedupe:")),
+        limit: 20,
+        from: duplicateMetricCandidateDatabaseURL
+    )
+    expect(
+        Set(duplicateSizeCandidates.map(\.path)) == Set([sameNamePartText.path, sameNamePartMarkdown.path]),
+        "SQLite candidate search should apply duplicate size filters"
+    )
+
+    let uniqueSizeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "sizedupe:0")),
+        limit: 20,
+        from: duplicateMetricCandidateDatabaseURL
+    )
+    expect(
+        Set(uniqueSizeCandidates.map(\.path)) == Set([uniqueDuplicateMetricEntry.path, folder.path]),
+        "SQLite candidate search should apply unique size filters"
+    )
+
+    let duplicateCreatedDateCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "dcdupe:")),
+        limit: 20,
+        from: duplicateMetricCandidateDatabaseURL
+    )
+    expect(
+        Set(duplicateCreatedDateCandidates.map(\.path)) == Set([sameNamePartText.path, sameNamePartMarkdown.path]),
+        "SQLite candidate search should apply duplicate created-date filters"
+    )
+
+    let duplicateModifiedDateCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "dmdupe:")),
+        limit: 20,
+        from: duplicateMetricCandidateDatabaseURL
+    )
+    expect(
+        Set(duplicateModifiedDateCandidates.map(\.path)) == Set([sameNamePartText.path, sameNamePartMarkdown.path]),
+        "SQLite candidate search should apply duplicate modified-date filters"
+    )
+
+    let duplicateAccessedDateCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "dadupe:")),
+        limit: 20,
+        from: duplicateMetricCandidateDatabaseURL
+    )
+    expect(
+        Set(duplicateAccessedDateCandidates.map(\.path)) == Set([sameNamePartText.path, sameNamePartMarkdown.path]),
+        "SQLite candidate search should apply duplicate accessed-date filters"
+    )
+
+    let duplicateAttributeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "attribdupe:")),
+        limit: 20,
+        from: duplicateMetricCandidateDatabaseURL
+    )
+    expect(
+        Set(duplicateAttributeCandidates.map(\.path)) == Set([sameNamePartText.path, sameNamePartMarkdown.path]),
+        "SQLite candidate search should apply duplicate attribute filters"
     )
 
     let unknownSizeCandidateDatabaseURL = temporaryDirectory.appending(path: "UnknownSizeCandidates.db")

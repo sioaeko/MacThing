@@ -542,6 +542,11 @@ public enum SearchCandidateNumericField: String, Sendable {
     case extensionLength
     case nameFrequency
     case extensionFrequency
+    case byteSizeFrequency
+    case createdDateFrequency
+    case modifiedDateFrequency
+    case accessedDateFrequency
+    case attributeFrequency
     case childCount
     case childFileCount
     case childFolderCount
@@ -1318,6 +1323,13 @@ public enum SearchEngine {
             default:
                 return false
             }
+        }
+
+        func addDuplicateMetricCandidateHint(value: String, field: SearchCandidateNumericField) {
+            let op: SearchCandidateComparisonOperator = isExplicitFalseBoolean(value)
+                ? .lessThanOrEqual
+                : .greaterThan
+            numericFilters.append(SearchCandidateNumericFilter(field: field, op: op, value: 1))
         }
 
         func addDateCandidateHint(value: String, field: SearchCandidateDateField) -> Bool {
@@ -2273,12 +2285,20 @@ public enum SearchEngine {
                     guard addAncestorSiblingCandidateHint(value: value, allowedKinds: [.folder, .package]) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
+                case "sizedupe":
+                    addDuplicateMetricCandidateHint(value: value, field: .byteSizeFrequency)
+                case "dcdupe":
+                    addDuplicateMetricCandidateHint(value: value, field: .createdDateFrequency)
+                case "dmdupe":
+                    addDuplicateMetricCandidateHint(value: value, field: .modifiedDateFrequency)
+                case "dadupe":
+                    addDuplicateMetricCandidateHint(value: value, field: .accessedDateFrequency)
+                case "attribdupe", "attrdupe":
+                    addDuplicateMetricCandidateHint(value: value, field: .attributeFrequency)
                 case "content", "ansicontent", "utf8content", "utf16content", "utf16becontent",
                      "regex", "dupe", "dupename", "nothing",
                      "pathdupe",
-                     "namepartdupe", "sizedupe",
-                     "attribdupe", "attrdupe", "dadupe", "dcdupe",
-                     "dmdupe", "fsi",
+                     "namepartdupe", "fsi",
                      "width", "height", "bitdepth",
                      "dimension", "dimensions", "orientation", "aspect-ratio",
                      "aspectratio",
