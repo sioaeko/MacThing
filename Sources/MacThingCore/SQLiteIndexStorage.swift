@@ -801,6 +801,15 @@ private final class SQLiteDatabase {
             bindings.append(contentsOf: parentChildFilter.bindings)
         }
 
+        for filter in hint.siblingFilters {
+            let siblingFilter = siblingFilterClause(
+                tablePrefix: tablePrefix,
+                filter: filter
+            )
+            clauses.append(siblingFilter.clause)
+            bindings.append(contentsOf: siblingFilter.bindings)
+        }
+
         if let filter = hint.fileReferenceFilter {
             if let fileID = filter.fileID, !fileID.isEmpty {
                 clauses.append("LOWER(\(prefix)file_id) = ?")
@@ -1258,6 +1267,47 @@ private final class SQLiteDatabase {
                 SELECT 1
                 FROM entries AS child
                 WHERE \(childClauses.joined(separator: " AND "))
+                LIMIT 1
+            )
+            """
+        return (clause, bindings)
+    }
+
+    private func siblingFilterClause(
+        tablePrefix: String?,
+        filter: SearchCandidateSiblingFilter
+    ) -> (clause: String, bindings: [SQLiteValue]) {
+        let parentExpression = outerParentExpression(tablePrefix: tablePrefix)
+        let pathExpression = outerPathExpression(tablePrefix: tablePrefix)
+        var siblingClauses = [
+            "sibling.parent = \(parentExpression)",
+            "sibling.path != \(pathExpression)"
+        ]
+        var bindings: [SQLiteValue] = []
+
+        if let allowedKinds = filter.allowedKinds {
+            let kinds = allowedKinds.map(\.rawValue).sorted()
+            siblingClauses.append("sibling.kind IN (\(placeholders(count: kinds.count)))")
+            bindings.append(contentsOf: kinds.map(SQLiteValue.text))
+        }
+
+        if let value = filter.value, !value.isEmpty {
+            var matchClauses = ["instr(sibling.name, ?) > 0"]
+            bindings.append(.text(value))
+
+            if filter.searchesPath {
+                matchClauses.append("instr(sibling.path, ?) > 0")
+                bindings.append(.text(value))
+            }
+
+            siblingClauses.append("(\(matchClauses.joined(separator: " OR ")))")
+        }
+
+        let clause = """
+            EXISTS (
+                SELECT 1
+                FROM entries AS sibling
+                WHERE \(siblingClauses.joined(separator: " AND "))
                 LIMIT 1
             )
             """

@@ -3507,6 +3507,31 @@ expect(
     "sibling: searches should avoid lossy SQLite candidate prefiltering"
 )
 
+let siblingPresenceHint = SearchEngine.candidateHint(for: SearchRequest(query: "sibling:"))
+expect(
+    siblingPresenceHint.canUseDatabaseCandidates &&
+        siblingPresenceHint.siblingFilters.first?.value == nil,
+    "sibling: presence searches should be pushed into SQLite candidate hints"
+)
+
+let exactSiblingHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "sibling:Empty", options: exactParentChildOptions)
+)
+expect(
+    exactSiblingHint.canUseDatabaseCandidates &&
+        exactSiblingHint.siblingFilters.first?.value == "Empty",
+    "exact sibling: searches should be pushed into SQLite candidate hints"
+)
+
+let exactSiblingFolderHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "sibling-folder:Launch", options: exactParentChildOptions)
+)
+expect(
+    exactSiblingFolderHint.canUseDatabaseCandidates &&
+        exactSiblingFolderHint.siblingFilters.first?.allowedKinds == Set<FileKind>([.folder, .package]),
+    "exact sibling-folder: searches should preserve kind filters in SQLite candidate hints"
+)
+
 let siblingCountHint = SearchEngine.candidateHint(for: SearchRequest(query: "sibling-count:>0"))
 expect(
     siblingCountHint.canUseDatabaseCandidates &&
@@ -5983,6 +6008,52 @@ do {
         IndexSnapshot(rootPath: "/Users/me", entries: [document, folder, emptyFile, childInFolder]),
         to: siblingCountCandidateDatabaseURL
     )
+    let siblingPresenceCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "sibling:")),
+        limit: 20,
+        from: siblingCountCandidateDatabaseURL
+    )
+    expect(
+        Set(siblingPresenceCandidates.map(\.path)) == Set([document.path, folder.path, emptyFile.path]),
+        "SQLite candidate search should apply sibling presence filters"
+    )
+
+    let exactSiblingCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "sibling:Empty", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: siblingCountCandidateDatabaseURL
+    )
+    expect(
+        Set(exactSiblingCandidates.map(\.path)) == Set([document.path, folder.path]),
+        "SQLite candidate search should apply exact sibling text filters"
+    )
+
+    let exactSiblingFileCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "sibling-file:Empty", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: siblingCountCandidateDatabaseURL
+    )
+    expect(
+        Set(exactSiblingFileCandidates.map(\.path)) == Set([document.path, folder.path]),
+        "SQLite candidate search should apply exact sibling-file filters"
+    )
+
+    let exactSiblingFolderCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "sibling-folder:Launch", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: siblingCountCandidateDatabaseURL
+    )
+    expect(
+        Set(exactSiblingFolderCandidates.map(\.path)) == Set([document.path, emptyFile.path]),
+        "SQLite candidate search should apply exact sibling-folder filters"
+    )
+
     let siblingCountCandidates = try IndexStorage.candidateEntries(
         hint: SearchEngine.candidateHint(for: SearchRequest(query: "sibling-count:2")),
         limit: 20,
