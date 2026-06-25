@@ -3281,10 +3281,35 @@ expect(
     "child: searches should avoid lossy SQLite candidate prefiltering"
 )
 
+let childPresenceHint = SearchEngine.candidateHint(for: SearchRequest(query: "child:"))
+expect(
+    childPresenceHint.canUseDatabaseCandidates &&
+        childPresenceHint.childTextFilters.first?.value == nil,
+    "child: presence searches should be pushed into SQLite candidate hints"
+)
+
+let exactChildHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "child:Child", options: exactParentChildOptions)
+)
+expect(
+    exactChildHint.canUseDatabaseCandidates &&
+        exactChildHint.childTextFilters.first?.value == "Child",
+    "exact child: searches should be pushed into SQLite candidate hints"
+)
+
 let childFileHint = SearchEngine.candidateHint(for: SearchRequest(query: "child-file:Child"))
 expect(
     childFileHint.canUseDatabaseCandidates == false,
     "child-file: searches should avoid lossy SQLite candidate prefiltering"
+)
+
+let exactChildFolderHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "child-folder:Nested", options: exactParentChildOptions)
+)
+expect(
+    exactChildFolderHint.canUseDatabaseCandidates &&
+        exactChildFolderHint.childTextFilters.first?.allowedKinds == Set<FileKind>([.folder, .package]),
+    "exact child-folder: searches should preserve kind filters in SQLite candidate hints"
 )
 
 let childCountHint = SearchEngine.candidateHint(for: SearchRequest(query: "childcount:>0"))
@@ -5587,6 +5612,52 @@ do {
         IndexSnapshot(rootPath: "/Users/me", entries: [document, folder, childInFolder, childFolderInFolder, nestedGrandchild]),
         to: childCountCandidateDatabaseURL
     )
+    let childPresenceCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "child:")),
+        limit: 20,
+        from: childCountCandidateDatabaseURL
+    )
+    expect(
+        Set(childPresenceCandidates.map(\.path)) == Set([folder.path, childFolderInFolder.path]),
+        "SQLite candidate search should apply child presence filters"
+    )
+
+    let exactChildCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "child:Child", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: childCountCandidateDatabaseURL
+    )
+    expect(
+        exactChildCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply exact child text filters"
+    )
+
+    let exactChildFileCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "child-file:Child", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: childCountCandidateDatabaseURL
+    )
+    expect(
+        exactChildFileCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply exact child-file filters"
+    )
+
+    let exactChildFolderCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "child-folder:Nested", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: childCountCandidateDatabaseURL
+    )
+    expect(
+        exactChildFolderCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply exact child-folder filters"
+    )
+
     let childCountCandidates = try IndexStorage.candidateEntries(
         hint: SearchEngine.candidateHint(for: SearchRequest(query: "childcount:>0")),
         limit: 20,

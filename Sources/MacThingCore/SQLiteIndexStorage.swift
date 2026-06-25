@@ -810,6 +810,16 @@ private final class SQLiteDatabase {
             bindings.append(contentsOf: siblingFilter.bindings)
         }
 
+        for filter in hint.childTextFilters {
+            let childFilter = childTextFilterClause(
+                prefix: prefix,
+                tablePrefix: tablePrefix,
+                filter: filter
+            )
+            clauses.append(childFilter.clause)
+            bindings.append(contentsOf: childFilter.bindings)
+        }
+
         if let filter = hint.fileReferenceFilter {
             if let fileID = filter.fileID, !fileID.isEmpty {
                 clauses.append("LOWER(\(prefix)file_id) = ?")
@@ -1268,6 +1278,47 @@ private final class SQLiteDatabase {
                 FROM entries AS child
                 WHERE \(childClauses.joined(separator: " AND "))
                 LIMIT 1
+            )
+            """
+        return (clause, bindings)
+    }
+
+    private func childTextFilterClause(
+        prefix: String,
+        tablePrefix: String?,
+        filter: SearchCandidateChildTextFilter
+    ) -> (clause: String, bindings: [SQLiteValue]) {
+        let pathExpression = outerPathExpression(tablePrefix: tablePrefix)
+        var childClauses = ["child.parent = \(pathExpression)"]
+        var bindings: [SQLiteValue] = []
+
+        if let allowedKinds = filter.allowedKinds {
+            let kinds = allowedKinds.map(\.rawValue).sorted()
+            childClauses.append("child.kind IN (\(placeholders(count: kinds.count)))")
+            bindings.append(contentsOf: kinds.map(SQLiteValue.text))
+        }
+
+        if let value = filter.value, !value.isEmpty {
+            var matchClauses = ["instr(child.name, ?) > 0"]
+            bindings.append(.text(value))
+
+            if filter.searchesPath {
+                matchClauses.append("instr(child.path, ?) > 0")
+                bindings.append(.text(value))
+            }
+
+            childClauses.append("(\(matchClauses.joined(separator: " OR ")))")
+        }
+
+        let clause = """
+            (
+                \(prefix)kind IN ('folder', 'package')
+                AND EXISTS (
+                    SELECT 1
+                    FROM entries AS child
+                    WHERE \(childClauses.joined(separator: " AND "))
+                    LIMIT 1
+                )
             )
             """
         return (clause, bindings)
