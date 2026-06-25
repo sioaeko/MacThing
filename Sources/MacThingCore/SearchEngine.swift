@@ -540,6 +540,8 @@ public enum SearchCandidateNumericField: String, Sendable {
     case pathUTF8Length
     case pathPartLength
     case extensionLength
+    case nameFrequency
+    case extensionFrequency
     case childCount
     case childFileCount
     case childFolderCount
@@ -1977,6 +1979,18 @@ public enum SearchEngine {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
                     numericFilters.append(contentsOf: filter.candidateFilters(field: .mediaYear))
+                case "namefrequency":
+                    guard request.options.caseSensitive && request.options.diacriticSensitive,
+                          let filter = ComparisonFilter<Int>.parse(value.isEmpty ? ">0" : value, valueParser: { Int($0) }) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .nameFrequency))
+                case "extensionfrequency":
+                    guard request.options.caseSensitive && request.options.diacriticSensitive,
+                          let filter = ComparisonFilter<Int>.parse(value.isEmpty ? ">0" : value, valueParser: { Int($0) }) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .extensionFrequency))
                 case "startwith", "startswith", "beginwith", "beginswith", "begin":
                     if !value.isEmpty {
                         terms.append(value)
@@ -2261,8 +2275,7 @@ public enum SearchEngine {
                     }
                 case "content", "ansicontent", "utf8content", "utf16content", "utf16becontent",
                      "regex", "dupe", "dupename", "nothing",
-                     "namefrequency",
-                     "extensionfrequency", "pathdupe",
+                     "pathdupe",
                      "namepartdupe", "sizedupe",
                      "attribdupe", "attrdupe", "dadupe", "dcdupe",
                      "dmdupe", "fsi",

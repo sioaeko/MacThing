@@ -110,7 +110,7 @@ private final class SQLiteDatabase {
 
     private var db: OpaquePointer?
     private let databasePath: String
-    private let derivedColumnsBackfillKey = "derivedColumnsBackfilledV3"
+    private let derivedColumnsBackfillKey = "derivedColumnsBackfilledV4"
     private let trigramBackfillKey = "trigramBackfilledV1"
 
     init(url: URL) throws {
@@ -150,6 +150,7 @@ private final class SQLiteDatabase {
                 name TEXT NOT NULL,
                 parent TEXT NOT NULL,
                 extension_name TEXT NOT NULL DEFAULT '',
+                exact_extension_name TEXT NOT NULL DEFAULT '',
                 name_length INTEGER NOT NULL DEFAULT 0,
                 name_part_length INTEGER NOT NULL DEFAULT 0,
                 name_character_count INTEGER NOT NULL DEFAULT 0,
@@ -182,6 +183,7 @@ private final class SQLiteDatabase {
             """)
         try? execute("ALTER TABLE entries ADD COLUMN attributes INTEGER NOT NULL DEFAULT 0;")
         try? execute("ALTER TABLE entries ADD COLUMN extension_name TEXT NOT NULL DEFAULT '';")
+        try? execute("ALTER TABLE entries ADD COLUMN exact_extension_name TEXT NOT NULL DEFAULT '';")
         try? execute("ALTER TABLE entries ADD COLUMN name_length INTEGER NOT NULL DEFAULT 0;")
         try? execute("ALTER TABLE entries ADD COLUMN name_part_length INTEGER NOT NULL DEFAULT 0;")
         try? execute("ALTER TABLE entries ADD COLUMN name_character_count INTEGER NOT NULL DEFAULT 0;")
@@ -204,6 +206,7 @@ private final class SQLiteDatabase {
         try execute("CREATE INDEX IF NOT EXISTS entries_name_idx ON entries(name);")
         try execute("CREATE INDEX IF NOT EXISTS entries_parent_idx ON entries(parent);")
         try execute("CREATE INDEX IF NOT EXISTS entries_extension_idx ON entries(extension_name);")
+        try execute("CREATE INDEX IF NOT EXISTS entries_exact_extension_kind_idx ON entries(exact_extension_name, kind);")
         try execute("CREATE INDEX IF NOT EXISTS entries_name_length_idx ON entries(name_length);")
         try execute("CREATE INDEX IF NOT EXISTS entries_name_part_length_idx ON entries(name_part_length);")
         try execute("CREATE INDEX IF NOT EXISTS entries_name_character_count_idx ON entries(name_character_count);")
@@ -263,6 +266,7 @@ private final class SQLiteDatabase {
 
     private struct DerivedLengthValues {
         let extensionName: String
+        let exactExtensionName: String
         let nameLength: Int
         let namePartLength: Int
         let nameCharacterCount: Int
@@ -274,7 +278,8 @@ private final class SQLiteDatabase {
     }
 
     private func derivedLengthValues(path: String, name: String, parent: String) -> DerivedLengthValues {
-        let extensionName = URL(fileURLWithPath: name).pathExtension.lowercased()
+        let exactExtensionName = URL(fileURLWithPath: path).pathExtension
+        let extensionName = exactExtensionName.lowercased()
         let namePart: String
         if !extensionName.isEmpty, name.count > extensionName.count + 1 {
             namePart = String(name.dropLast(extensionName.count + 1))
@@ -284,6 +289,7 @@ private final class SQLiteDatabase {
 
         return DerivedLengthValues(
             extensionName: extensionName,
+            exactExtensionName: exactExtensionName,
             nameLength: name.utf16.count,
             namePartLength: namePart.utf16.count,
             nameCharacterCount: name.count,
@@ -329,6 +335,7 @@ private final class SQLiteDatabase {
             try withStatement("""
                 UPDATE entries
                 SET extension_name = ?,
+                    exact_extension_name = ?,
                     name_length = ?,
                     name_part_length = ?,
                     name_character_count = ?,
@@ -345,6 +352,7 @@ private final class SQLiteDatabase {
                     try statement.reset()
                     try statement.bind([
                         .text(derived.extensionName),
+                        .text(derived.exactExtensionName),
                         .int(Int64(derived.nameLength)),
                         .int(Int64(derived.namePartLength)),
                         .int(Int64(derived.nameCharacterCount)),
@@ -1041,6 +1049,10 @@ private final class SQLiteDatabase {
             return "\(prefix)path_part_length"
         case .extensionLength:
             return "\(prefix)extension_length"
+        case .nameFrequency:
+            return nameFrequencyExpression(tablePrefix: tablePrefix)
+        case .extensionFrequency:
+            return extensionFrequencyExpression(prefix: prefix, tablePrefix: tablePrefix)
         case .childCount:
             return childCountExpression(prefix: prefix, tablePrefix: tablePrefix, allowedKinds: nil)
         case .childFileCount:
@@ -1062,6 +1074,27 @@ private final class SQLiteDatabase {
         case .siblingFolderCount:
             return siblingCountExpression(prefix: prefix, tablePrefix: tablePrefix, allowedKinds: [.folder, .package])
         }
+    }
+
+    private func nameFrequencyExpression(tablePrefix: String?) -> String {
+        let nameExpression = tablePrefix.map { "\($0).name" } ?? "entries.name"
+        return "(SELECT COUNT(1) FROM entries AS same_name WHERE same_name.name = \(nameExpression))"
+    }
+
+    private func extensionFrequencyExpression(prefix: String, tablePrefix: String?) -> String {
+        let extensionExpression = tablePrefix.map { "\($0).exact_extension_name" } ?? "entries.exact_extension_name"
+        return """
+            (CASE
+                WHEN \(prefix)kind IN ('file', 'other', 'symlink') THEN
+                    (
+                        SELECT COUNT(1)
+                        FROM entries AS same_extension
+                        WHERE same_extension.kind IN ('file', 'other', 'symlink')
+                            AND same_extension.exact_extension_name = \(extensionExpression)
+                    )
+                ELSE NULL
+            END)
+            """
     }
 
     private func childCountExpression(prefix: String, tablePrefix: String?, allowedKinds: [FileKind]?) -> String {
@@ -1852,13 +1885,13 @@ private final class SQLiteDatabase {
     private func insert(entries: [FileEntry]) throws {
         let entrySQL = """
             INSERT OR REPLACE INTO entries (
-                path, name, parent, extension_name, name_length, name_part_length,
-                name_character_count, path_length, path_part_length, extension_length,
-                name_utf8_length, path_utf8_length, kind, byte_size, created_at, modified_at,
-                accessed_at, indexed_at, run_count, last_run_at, attributes, file_id, volume_id,
-                file_list_name, file_list_path, media_title, media_artist, media_album, media_comment,
-                media_genre, media_track, media_year
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                path, name, parent, extension_name, exact_extension_name, name_length,
+                name_part_length, name_character_count, path_length, path_part_length,
+                extension_length, name_utf8_length, path_utf8_length, kind, byte_size,
+                created_at, modified_at, accessed_at, indexed_at, run_count, last_run_at,
+                attributes, file_id, volume_id, file_list_name, file_list_path, media_title,
+                media_artist, media_album, media_comment, media_genre, media_track, media_year
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """
         let ftsSQL = "INSERT INTO entries_fts(path, name, parent) VALUES (?, ?, ?);"
         let trigramSQL = "INSERT INTO entries_trigram(path) VALUES (?);"
@@ -1874,6 +1907,7 @@ private final class SQLiteDatabase {
                             .text(entry.name),
                             .text(entry.parent),
                             .text(derived.extensionName),
+                            .text(derived.exactExtensionName),
                             .int(Int64(derived.nameLength)),
                             .int(Int64(derived.namePartLength)),
                             .int(Int64(derived.nameCharacterCount)),

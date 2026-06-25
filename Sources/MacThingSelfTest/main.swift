@@ -3690,10 +3690,28 @@ expect(
     "name-frequency: searches should avoid lossy SQLite candidate prefiltering"
 )
 
+let exactNameFrequencyHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "name-frequency:>1", options: exactParentChildOptions)
+)
+expect(
+    exactNameFrequencyHint.canUseDatabaseCandidates &&
+        exactNameFrequencyHint.numericFilters.first?.field == .nameFrequency,
+    "exact name-frequency: searches should be pushed into SQLite candidate hints"
+)
+
 let extensionFrequencyHint = SearchEngine.candidateHint(for: SearchRequest(query: "extension-frequency:>1"))
 expect(
     extensionFrequencyHint.canUseDatabaseCandidates == false,
     "extension-frequency: searches should avoid lossy SQLite candidate prefiltering"
+)
+
+let exactExtensionFrequencyHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "extension-frequency:>1", options: exactParentChildOptions)
+)
+expect(
+    exactExtensionFrequencyHint.canUseDatabaseCandidates &&
+        exactExtensionFrequencyHint.numericFilters.first?.field == .extensionFrequency,
+    "exact extension-frequency: searches should be pushed into SQLite candidate hints"
 )
 
 let pathDupeHint = SearchEngine.candidateHint(for: SearchRequest(query: "path-dupe:"))
@@ -6012,6 +6030,35 @@ do {
     expect(
         Set(extensionLengthCandidates.map(\.path)) == Set([photo.path, utf8NameEntry.path, emojiNameEntry.path]),
         "SQLite candidate search should apply extension-length filters"
+    )
+
+    let frequencyCandidateDatabaseURL = temporaryDirectory.appending(path: "FrequencyCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: "/Users/me", entries: [document, duplicateA, duplicateB, photo, folder]),
+        to: frequencyCandidateDatabaseURL
+    )
+    let exactNameFrequencyCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "name-frequency:>1", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: frequencyCandidateDatabaseURL
+    )
+    expect(
+        Set(exactNameFrequencyCandidates.map(\.path)) == Set([duplicateA.path, duplicateB.path]),
+        "SQLite candidate search should apply exact name-frequency filters"
+    )
+
+    let exactExtensionFrequencyCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "extension-frequency:>1", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: frequencyCandidateDatabaseURL
+    )
+    expect(
+        Set(exactExtensionFrequencyCandidates.map(\.path)) == Set([document.path, duplicateA.path, duplicateB.path]),
+        "SQLite candidate search should apply exact extension-frequency filters"
     )
 
     let childCountCandidateDatabaseURL = temporaryDirectory.appending(path: "ChildCountCandidates.db")
