@@ -655,6 +655,16 @@ public struct SearchCandidateChildAttributeFilter: Sendable {
     }
 }
 
+public struct SearchCandidateChildFileListFilter: Sendable {
+    public let nameValues: Set<String>
+    public let pathValues: Set<String>
+
+    public init(nameValues: Set<String>, pathValues: Set<String>) {
+        self.nameValues = nameValues
+        self.pathValues = pathValues
+    }
+}
+
 public struct SearchCandidateHint: Sendable {
     public let terms: [String]
     public let canUseDatabaseCandidates: Bool
@@ -671,6 +681,7 @@ public struct SearchCandidateHint: Sendable {
     public let childRunCountFilters: [SearchCandidateChildRunCountFilter]
     public let childDateFilters: [SearchCandidateChildDateFilter]
     public let childAttributeFilters: [SearchCandidateChildAttributeFilter]
+    public let childFileListFilters: [SearchCandidateChildFileListFilter]
     public let fileReferenceFilter: SearchCandidateFileReferenceFilter?
     public let requiresFileListSource: Bool
     public let rootOnly: Bool
@@ -694,6 +705,7 @@ public struct SearchCandidateHint: Sendable {
         childRunCountFilters: [SearchCandidateChildRunCountFilter] = [],
         childDateFilters: [SearchCandidateChildDateFilter] = [],
         childAttributeFilters: [SearchCandidateChildAttributeFilter] = [],
+        childFileListFilters: [SearchCandidateChildFileListFilter] = [],
         fileReferenceFilter: SearchCandidateFileReferenceFilter? = nil,
         requiresFileListSource: Bool = false,
         rootOnly: Bool = false,
@@ -716,6 +728,7 @@ public struct SearchCandidateHint: Sendable {
         self.childRunCountFilters = childRunCountFilters
         self.childDateFilters = childDateFilters
         self.childAttributeFilters = childAttributeFilters
+        self.childFileListFilters = childFileListFilters
         self.fileReferenceFilter = fileReferenceFilter
         self.requiresFileListSource = requiresFileListSource
         self.rootOnly = rootOnly
@@ -738,6 +751,7 @@ public struct SearchCandidateHint: Sendable {
             !childRunCountFilters.isEmpty ||
             !childDateFilters.isEmpty ||
             !childAttributeFilters.isEmpty ||
+            !childFileListFilters.isEmpty ||
             fileReferenceFilter != nil ||
             requiresFileListSource ||
             rootOnly ||
@@ -934,6 +948,7 @@ public enum SearchEngine {
         var childRunCountFilters: [SearchCandidateChildRunCountFilter] = []
         var childDateFilters: [SearchCandidateChildDateFilter] = []
         var childAttributeFilters: [SearchCandidateChildAttributeFilter] = []
+        var childFileListFilters: [SearchCandidateChildFileListFilter] = []
         var fileReferenceFilter: SearchCandidateFileReferenceFilter?
         var requiresFileListSource = false
         var rootOnly = false
@@ -1607,6 +1622,28 @@ public enum SearchEngine {
                             excludedAttributes: filter.excluded
                         )
                     )
+                case "childfilelist":
+                    guard request.options.caseSensitive && request.options.diacriticSensitive else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+
+                    let values = parseDelimitedList(rawValue)
+                    guard !values.isEmpty else {
+                        continue
+                    }
+
+                    var nameValues = Set<String>()
+                    var pathValues = Set<String>()
+                    for value in values {
+                        if value.contains("/") || value.contains("\\") {
+                            pathValues.insert(normalizedFolderPath(value.replacingOccurrences(of: "\\", with: "/")))
+                        } else {
+                            nameValues.insert(value)
+                        }
+                    }
+                    childFileListFilters.append(
+                        SearchCandidateChildFileListFilter(nameValues: nameValues, pathValues: pathValues)
+                    )
                 case "title", "artist", "album", "comment", "genre":
                     guard let field = mediaTextField(for: function) else {
                         continue
@@ -1636,7 +1673,6 @@ public enum SearchEngine {
                      "childfile", "childfilename", "childfilenames",
                      "childfolder", "childfoldername", "childfoldernames",
                      "childdir", "childdirname", "childdirs", "childdirnames",
-                     "childfilelist",
                      "sibling", "siblingname", "siblingfile",
                      "siblingfiles", "siblingfolder", "siblingfolders",
                      "siblingdir", "siblingdirs", "namefrequency",
@@ -1687,6 +1723,7 @@ public enum SearchEngine {
             !childRunCountFilters.isEmpty ||
             !childDateFilters.isEmpty ||
             !childAttributeFilters.isEmpty ||
+            !childFileListFilters.isEmpty ||
             fileReferenceFilter != nil ||
             requiresFileListSource ||
             rootOnly ||
@@ -1709,6 +1746,7 @@ public enum SearchEngine {
             childRunCountFilters: childRunCountFilters,
             childDateFilters: childDateFilters,
             childAttributeFilters: childAttributeFilters,
+            childFileListFilters: childFileListFilters,
             fileReferenceFilter: fileReferenceFilter,
             requiresFileListSource: requiresFileListSource,
             rootOnly: rootOnly,

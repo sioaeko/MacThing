@@ -3415,7 +3415,31 @@ expect(
 let childFileListHint = SearchEngine.candidateHint(for: SearchRequest(query: "child-file-list:Metadata.bin"))
 expect(
     childFileListHint.canUseDatabaseCandidates == false,
-    "child-file-list: searches should avoid lossy SQLite candidate prefiltering"
+    "default child-file-list: searches should avoid lossy SQLite candidate prefiltering"
+)
+
+let exactChildFileListOptions = SearchOptions(caseSensitive: true, diacriticSensitive: true)
+let exactChildFileListHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "child-file-list:Metadata.bin", options: exactChildFileListOptions)
+)
+expect(
+    exactChildFileListHint.canUseDatabaseCandidates &&
+        exactChildFileListHint.childFileListFilters.first?.nameValues == Set(["Metadata.bin"]),
+    "exact child-file-list: searches should be pushed into SQLite candidate hints"
+)
+
+let exactChildFileListPathHint = SearchEngine.candidateHint(
+    for: SearchRequest(
+        query: "child-file-list:/Users/me/Documents/Launch/MetadataFolder",
+        options: exactChildFileListOptions
+    )
+)
+expect(
+    exactChildFileListPathHint.canUseDatabaseCandidates &&
+        exactChildFileListPathHint.childFileListFilters.first?.pathValues == Set([
+            "/Users/me/Documents/Launch/MetadataFolder"
+        ]),
+    "exact child-file-list: path values should be normalized for SQLite candidate hints"
 )
 
 let siblingHint = SearchEngine.candidateHint(for: SearchRequest(query: "sibling:Launch"))
@@ -5623,6 +5647,51 @@ do {
     expect(
         childDateRunCandidates.map(\.path) == [folder.path],
         "SQLite candidate search should apply child date-run filters"
+    )
+
+    let childFileListNameCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(
+                query: "child-file-list:Metadata.bin;Missing.bin",
+                options: exactChildFileListOptions
+            )
+        ),
+        limit: 20,
+        from: childSizeCandidateDatabaseURL
+    )
+    expect(
+        childFileListNameCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply exact child-file-list name filters"
+    )
+
+    let childFileListPathCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(
+                query: "child-file-list:/Users/me/Documents/Launch/MetadataFolder",
+                options: exactChildFileListOptions
+            )
+        ),
+        limit: 20,
+        from: childSizeCandidateDatabaseURL
+    )
+    expect(
+        childFileListPathCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply exact child-file-list path filters"
+    )
+
+    let childFileListPartialCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(
+                query: "child-file-list:Metadata",
+                options: exactChildFileListOptions
+            )
+        ),
+        limit: 20,
+        from: childSizeCandidateDatabaseURL
+    )
+    expect(
+        childFileListPartialCandidates.isEmpty,
+        "SQLite child-file-list filters should not perform partial child filename matching"
     )
 
     let childAttributeCandidateDatabaseURL = temporaryDirectory.appending(path: "ChildAttributeCandidates.db")

@@ -755,6 +755,16 @@ private final class SQLiteDatabase {
             bindings.append(contentsOf: childFilter.bindings)
         }
 
+        for filter in hint.childFileListFilters {
+            let childFilter = childFileListFilterClause(
+                prefix: prefix,
+                tablePrefix: tablePrefix,
+                filter: filter
+            )
+            clauses.append(childFilter.clause)
+            bindings.append(contentsOf: childFilter.bindings)
+        }
+
         if let filter = hint.fileReferenceFilter {
             if let fileID = filter.fileID, !fileID.isEmpty {
                 clauses.append("LOWER(\(prefix)file_id) = ?")
@@ -1024,6 +1034,48 @@ private final class SQLiteDatabase {
             childClauses.append("(child.attributes & ?) = 0")
             bindings.append(.int(Int64(filter.excludedAttributes.rawValue)))
         }
+
+        let clause = """
+            (
+                \(prefix)kind IN ('folder', 'package')
+                AND EXISTS (
+                    SELECT 1
+                    FROM entries AS child
+                    WHERE \(childClauses.joined(separator: " AND "))
+                    LIMIT 1
+                )
+            )
+            """
+        return (clause, bindings)
+    }
+
+    private func childFileListFilterClause(
+        prefix: String,
+        tablePrefix: String?,
+        filter: SearchCandidateChildFileListFilter
+    ) -> (clause: String, bindings: [SQLiteValue]) {
+        let pathExpression = outerPathExpression(tablePrefix: tablePrefix)
+        var childClauses = ["child.parent = \(pathExpression)"]
+        var matchClauses: [String] = []
+        var bindings: [SQLiteValue] = []
+
+        if !filter.nameValues.isEmpty {
+            let values = filter.nameValues.sorted()
+            matchClauses.append("child.name IN (\(placeholders(count: values.count)))")
+            bindings.append(contentsOf: values.map(SQLiteValue.text))
+        }
+
+        if !filter.pathValues.isEmpty {
+            let values = filter.pathValues.sorted()
+            matchClauses.append("child.path IN (\(placeholders(count: values.count)))")
+            bindings.append(contentsOf: values.map(SQLiteValue.text))
+        }
+
+        guard !matchClauses.isEmpty else {
+            return ("0", [])
+        }
+
+        childClauses.append("(\(matchClauses.joined(separator: " OR ")))")
 
         let clause = """
             (
