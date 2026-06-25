@@ -3707,6 +3707,46 @@ expect(
     "attribute duplicate searches should be pushed into SQLite candidate hints"
 )
 
+let duplicateNameHint = SearchEngine.candidateHint(for: SearchRequest(query: "dupe:"))
+expect(
+    duplicateNameHint.canUseDatabaseCandidates == false,
+    "default duplicate-name searches should avoid lossy SQLite candidate prefiltering"
+)
+
+let exactDuplicateNameHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "dupe:", options: exactParentChildOptions)
+)
+expect(
+    exactDuplicateNameHint.canUseDatabaseCandidates &&
+        exactDuplicateNameHint.numericFilters.first?.field == .nameFrequency,
+    "exact duplicate-name searches should be pushed into SQLite candidate hints"
+)
+
+let exactUniqueNameHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "dupe:0", options: exactParentChildOptions)
+)
+expect(
+    exactUniqueNameHint.canUseDatabaseCandidates &&
+        exactUniqueNameHint.numericFilters.first?.field == .nameFrequency &&
+        exactUniqueNameHint.numericFilters.first?.op == .lessThanOrEqual,
+    "exact unique-name searches should be pushed into SQLite candidate hints"
+)
+
+let namePartDupeHint = SearchEngine.candidateHint(for: SearchRequest(query: "namepartdupe:"))
+expect(
+    namePartDupeHint.canUseDatabaseCandidates == false,
+    "default namepartdupe: searches should avoid lossy SQLite candidate prefiltering"
+)
+
+let exactNamePartDupeHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "namepartdupe:", options: exactParentChildOptions)
+)
+expect(
+    exactNamePartDupeHint.canUseDatabaseCandidates &&
+        exactNamePartDupeHint.numericFilters.first?.field == .namePartFrequency,
+    "exact namepartdupe: searches should be pushed into SQLite candidate hints"
+)
+
 let nameFrequencyHint = SearchEngine.candidateHint(for: SearchRequest(query: "name-frequency:>1"))
 expect(
     nameFrequencyHint.canUseDatabaseCandidates == false,
@@ -3741,6 +3781,15 @@ let pathDupeHint = SearchEngine.candidateHint(for: SearchRequest(query: "path-du
 expect(
     pathDupeHint.canUseDatabaseCandidates == false,
     "path-dupe: searches should avoid lossy SQLite candidate prefiltering"
+)
+
+let exactPathDupeHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "path-dupe:", options: exactParentChildOptions)
+)
+expect(
+    exactPathDupeHint.canUseDatabaseCandidates &&
+        exactPathDupeHint.numericFilters.first?.field == .pathPartFrequency,
+    "exact path-dupe: searches should be pushed into SQLite candidate hints"
 )
 
 let fileListHint = SearchEngine.candidateHint(for: SearchRequest(query: "filelist:Launch.JPG|Launch Notes.md"))
@@ -6082,6 +6131,81 @@ do {
     expect(
         Set(exactExtensionFrequencyCandidates.map(\.path)) == Set([document.path, duplicateA.path, duplicateB.path]),
         "SQLite candidate search should apply exact extension-frequency filters"
+    )
+
+    let exactDuplicateNameCandidateDatabaseURL = temporaryDirectory.appending(path: "ExactDuplicateNameCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: "/Users/me", entries: [document, duplicateA, duplicateB]),
+        to: exactDuplicateNameCandidateDatabaseURL
+    )
+    let exactDuplicateNameCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "dupe:", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: exactDuplicateNameCandidateDatabaseURL
+    )
+    expect(
+        Set(exactDuplicateNameCandidates.map(\.path)) == Set([duplicateA.path, duplicateB.path]),
+        "SQLite candidate search should apply exact duplicate-name filters"
+    )
+
+    let exactUniqueNameCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "dupe:0", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: exactDuplicateNameCandidateDatabaseURL
+    )
+    expect(
+        exactUniqueNameCandidates.map(\.path) == [document.path],
+        "SQLite candidate search should apply exact unique-name filters"
+    )
+
+    let exactNamePartCandidateDatabaseURL = temporaryDirectory.appending(path: "ExactNamePartCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: "/Users/me", entries: duplicateMetricEntries),
+        to: exactNamePartCandidateDatabaseURL
+    )
+    let exactNamePartDupeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "namepartdupe:", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: exactNamePartCandidateDatabaseURL
+    )
+    expect(
+        Set(exactNamePartDupeCandidates.map(\.path)) == Set([sameNamePartText.path, sameNamePartMarkdown.path]),
+        "SQLite candidate search should apply exact duplicate name-part filters"
+    )
+
+    let exactPathDupeCandidateDatabaseURL = temporaryDirectory.appending(path: "ExactPathDupeCandidates.db")
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: "/Users/me", entries: [document, folder, emptyFile, childInFolder]),
+        to: exactPathDupeCandidateDatabaseURL
+    )
+    let exactPathDupeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "path-dupe:", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: exactPathDupeCandidateDatabaseURL
+    )
+    expect(
+        Set(exactPathDupeCandidates.map(\.path)) == Set([document.path, folder.path, emptyFile.path]),
+        "SQLite candidate search should apply exact duplicate path-part filters"
+    )
+
+    let exactUniquePathCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "path-dupe:0", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: exactPathDupeCandidateDatabaseURL
+    )
+    expect(
+        exactUniquePathCandidates.map(\.path) == [childInFolder.path],
+        "SQLite candidate search should apply exact unique path-part filters"
     )
 
     let childCountCandidateDatabaseURL = temporaryDirectory.appending(path: "ChildCountCandidates.db")

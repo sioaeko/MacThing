@@ -100,8 +100,9 @@ The current packaged release is available from GitHub:
   date/size filters, total-size filters, sibling count filters,
   depth/parent-count filters,
   safe parent/ancestor path text filters, filename/path/extension length
-  filters, exact name/extension frequency filters, size/date/attribute
-  duplicate filters, and diacritic-sensitive media text filters.
+  filters, exact name/extension frequency filters, exact name/stem/path-part
+  duplicate filters, size/date/attribute duplicate filters, and
+  diacritic-sensitive media text filters.
 - File-name, path, wildcard, regex, and compact fuzzy matching. Wildcard and
   regex searches honor the same case/diacritic matching options as text search.
 - Match path, fuzzy, regex, case-sensitive, whole-word, and diacritic-sensitive

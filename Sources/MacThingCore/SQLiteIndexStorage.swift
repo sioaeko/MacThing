@@ -110,7 +110,7 @@ private final class SQLiteDatabase {
 
     private var db: OpaquePointer?
     private let databasePath: String
-    private let derivedColumnsBackfillKey = "derivedColumnsBackfilledV4"
+    private let derivedColumnsBackfillKey = "derivedColumnsBackfilledV5"
     private let trigramBackfillKey = "trigramBackfilledV1"
 
     init(url: URL) throws {
@@ -151,6 +151,8 @@ private final class SQLiteDatabase {
                 parent TEXT NOT NULL,
                 extension_name TEXT NOT NULL DEFAULT '',
                 exact_extension_name TEXT NOT NULL DEFAULT '',
+                exact_name_part TEXT NOT NULL DEFAULT '',
+                exact_path_part TEXT NOT NULL DEFAULT '',
                 name_length INTEGER NOT NULL DEFAULT 0,
                 name_part_length INTEGER NOT NULL DEFAULT 0,
                 name_character_count INTEGER NOT NULL DEFAULT 0,
@@ -184,6 +186,8 @@ private final class SQLiteDatabase {
         try? execute("ALTER TABLE entries ADD COLUMN attributes INTEGER NOT NULL DEFAULT 0;")
         try? execute("ALTER TABLE entries ADD COLUMN extension_name TEXT NOT NULL DEFAULT '';")
         try? execute("ALTER TABLE entries ADD COLUMN exact_extension_name TEXT NOT NULL DEFAULT '';")
+        try? execute("ALTER TABLE entries ADD COLUMN exact_name_part TEXT NOT NULL DEFAULT '';")
+        try? execute("ALTER TABLE entries ADD COLUMN exact_path_part TEXT NOT NULL DEFAULT '';")
         try? execute("ALTER TABLE entries ADD COLUMN name_length INTEGER NOT NULL DEFAULT 0;")
         try? execute("ALTER TABLE entries ADD COLUMN name_part_length INTEGER NOT NULL DEFAULT 0;")
         try? execute("ALTER TABLE entries ADD COLUMN name_character_count INTEGER NOT NULL DEFAULT 0;")
@@ -207,6 +211,8 @@ private final class SQLiteDatabase {
         try execute("CREATE INDEX IF NOT EXISTS entries_parent_idx ON entries(parent);")
         try execute("CREATE INDEX IF NOT EXISTS entries_extension_idx ON entries(extension_name);")
         try execute("CREATE INDEX IF NOT EXISTS entries_exact_extension_kind_idx ON entries(exact_extension_name, kind);")
+        try execute("CREATE INDEX IF NOT EXISTS entries_exact_name_part_idx ON entries(exact_name_part);")
+        try execute("CREATE INDEX IF NOT EXISTS entries_exact_path_part_idx ON entries(exact_path_part);")
         try execute("CREATE INDEX IF NOT EXISTS entries_name_length_idx ON entries(name_length);")
         try execute("CREATE INDEX IF NOT EXISTS entries_name_part_length_idx ON entries(name_part_length);")
         try execute("CREATE INDEX IF NOT EXISTS entries_name_character_count_idx ON entries(name_character_count);")
@@ -267,6 +273,8 @@ private final class SQLiteDatabase {
     private struct DerivedLengthValues {
         let extensionName: String
         let exactExtensionName: String
+        let exactNamePart: String
+        let exactPathPart: String
         let nameLength: Int
         let namePartLength: Int
         let nameCharacterCount: Int
@@ -280,21 +288,24 @@ private final class SQLiteDatabase {
     private func derivedLengthValues(path: String, name: String, parent: String) -> DerivedLengthValues {
         let exactExtensionName = URL(fileURLWithPath: path).pathExtension
         let extensionName = exactExtensionName.lowercased()
-        let namePart: String
-        if !extensionName.isEmpty, name.count > extensionName.count + 1 {
-            namePart = String(name.dropLast(extensionName.count + 1))
+        let exactNamePart: String
+        if !exactExtensionName.isEmpty, name.count > exactExtensionName.count + 1 {
+            exactNamePart = String(name.dropLast(exactExtensionName.count + 1))
         } else {
-            namePart = name
+            exactNamePart = name
         }
+        let exactPathPart = SearchEngine.normalizedFolderPath(parent)
 
         return DerivedLengthValues(
             extensionName: extensionName,
             exactExtensionName: exactExtensionName,
+            exactNamePart: exactNamePart,
+            exactPathPart: exactPathPart,
             nameLength: name.utf16.count,
-            namePartLength: namePart.utf16.count,
+            namePartLength: exactNamePart.utf16.count,
             nameCharacterCount: name.count,
             pathLength: path.utf16.count,
-            pathPartLength: SearchEngine.normalizedFolderPath(parent).utf16.count,
+            pathPartLength: exactPathPart.utf16.count,
             extensionLength: extensionName.utf16.count,
             nameUTF8Length: name.utf8.count,
             pathUTF8Length: path.utf8.count
@@ -336,6 +347,8 @@ private final class SQLiteDatabase {
                 UPDATE entries
                 SET extension_name = ?,
                     exact_extension_name = ?,
+                    exact_name_part = ?,
+                    exact_path_part = ?,
                     name_length = ?,
                     name_part_length = ?,
                     name_character_count = ?,
@@ -353,6 +366,8 @@ private final class SQLiteDatabase {
                     try statement.bind([
                         .text(derived.extensionName),
                         .text(derived.exactExtensionName),
+                        .text(derived.exactNamePart),
+                        .text(derived.exactPathPart),
                         .int(Int64(derived.nameLength)),
                         .int(Int64(derived.namePartLength)),
                         .int(Int64(derived.nameCharacterCount)),
@@ -1051,8 +1066,22 @@ private final class SQLiteDatabase {
             return "\(prefix)extension_length"
         case .nameFrequency:
             return nameFrequencyExpression(tablePrefix: tablePrefix)
+        case .namePartFrequency:
+            return valueFrequencyExpression(
+                tablePrefix: tablePrefix,
+                column: "exact_name_part",
+                alias: "same_name_part",
+                allowNullMatch: true
+            )
         case .extensionFrequency:
             return extensionFrequencyExpression(prefix: prefix, tablePrefix: tablePrefix)
+        case .pathPartFrequency:
+            return valueFrequencyExpression(
+                tablePrefix: tablePrefix,
+                column: "exact_path_part",
+                alias: "same_path_part",
+                allowNullMatch: true
+            )
         case .byteSizeFrequency:
             return valueFrequencyExpression(
                 tablePrefix: tablePrefix,
@@ -1937,13 +1966,14 @@ private final class SQLiteDatabase {
     private func insert(entries: [FileEntry]) throws {
         let entrySQL = """
             INSERT OR REPLACE INTO entries (
-                path, name, parent, extension_name, exact_extension_name, name_length,
-                name_part_length, name_character_count, path_length, path_part_length,
-                extension_length, name_utf8_length, path_utf8_length, kind, byte_size,
-                created_at, modified_at, accessed_at, indexed_at, run_count, last_run_at,
-                attributes, file_id, volume_id, file_list_name, file_list_path, media_title,
-                media_artist, media_album, media_comment, media_genre, media_track, media_year
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                path, name, parent, extension_name, exact_extension_name, exact_name_part,
+                exact_path_part, name_length, name_part_length, name_character_count,
+                path_length, path_part_length, extension_length, name_utf8_length,
+                path_utf8_length, kind, byte_size, created_at, modified_at, accessed_at,
+                indexed_at, run_count, last_run_at, attributes, file_id, volume_id,
+                file_list_name, file_list_path, media_title, media_artist, media_album,
+                media_comment, media_genre, media_track, media_year
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """
         let ftsSQL = "INSERT INTO entries_fts(path, name, parent) VALUES (?, ?, ?);"
         let trigramSQL = "INSERT INTO entries_trigram(path) VALUES (?);"
@@ -1960,6 +1990,8 @@ private final class SQLiteDatabase {
                             .text(entry.parent),
                             .text(derived.extensionName),
                             .text(derived.exactExtensionName),
+                            .text(derived.exactNamePart),
+                            .text(derived.exactPathPart),
                             .int(Int64(derived.nameLength)),
                             .int(Int64(derived.namePartLength)),
                             .int(Int64(derived.nameCharacterCount)),

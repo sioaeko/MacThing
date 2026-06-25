@@ -541,7 +541,9 @@ public enum SearchCandidateNumericField: String, Sendable {
     case pathPartLength
     case extensionLength
     case nameFrequency
+    case namePartFrequency
     case extensionFrequency
+    case pathPartFrequency
     case byteSizeFrequency
     case createdDateFrequency
     case modifiedDateFrequency
@@ -2285,6 +2287,21 @@ public enum SearchEngine {
                     guard addAncestorSiblingCandidateHint(value: value, allowedKinds: [.folder, .package]) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
+                case "dupe", "dupename":
+                    guard request.options.caseSensitive && request.options.diacriticSensitive else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    addDuplicateMetricCandidateHint(value: value, field: .nameFrequency)
+                case "namepartdupe":
+                    guard request.options.caseSensitive && request.options.diacriticSensitive else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    addDuplicateMetricCandidateHint(value: value, field: .namePartFrequency)
+                case "pathdupe":
+                    guard request.options.caseSensitive && request.options.diacriticSensitive else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    addDuplicateMetricCandidateHint(value: value, field: .pathPartFrequency)
                 case "sizedupe":
                     addDuplicateMetricCandidateHint(value: value, field: .byteSizeFrequency)
                 case "dcdupe":
@@ -2296,9 +2313,8 @@ public enum SearchEngine {
                 case "attribdupe", "attrdupe":
                     addDuplicateMetricCandidateHint(value: value, field: .attributeFrequency)
                 case "content", "ansicontent", "utf8content", "utf16content", "utf16becontent",
-                     "regex", "dupe", "dupename", "nothing",
-                     "pathdupe",
-                     "namepartdupe", "fsi",
+                     "regex", "nothing",
+                     "fsi",
                      "width", "height", "bitdepth",
                      "dimension", "dimensions", "orientation", "aspect-ratio",
                      "aspectratio",
