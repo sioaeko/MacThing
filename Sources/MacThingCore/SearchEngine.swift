@@ -543,6 +543,7 @@ public enum SearchCandidateNumericField: String, Sendable {
     case childCount
     case childFileCount
     case childFolderCount
+    case totalChildSize
     case siblingCount
     case siblingFileCount
     case siblingFolderCount
@@ -1255,6 +1256,11 @@ public enum SearchEngine {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
                     numericFilters.append(contentsOf: filter.candidateFilters(field: .childFolderCount))
+                case "totalchildsize":
+                    guard let filter = ComparisonFilter<Int64>.parse(value, valueParser: parseByteSize) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
+                    numericFilters.append(contentsOf: filter.candidateFilters(field: .totalChildSize))
                 case "siblingcount":
                     guard let filter = ComparisonFilter<Int>.parse(value.isEmpty ? ">0" : value, valueParser: { Int($0) }) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
@@ -1420,7 +1426,6 @@ public enum SearchEngine {
                      "siblingfiles", "siblingfolder", "siblingfolders",
                      "siblingdir", "siblingdirs", "namefrequency",
                      "extensionfrequency", "pathdupe",
-                     "totalchildsize",
                      "descendant", "descendantname", "descendantfile",
                      "descendantfilename", "descendantfilenames", "descendantfolder",
                      "descendantfoldername", "descendantfoldernames",

@@ -812,6 +812,8 @@ private final class SQLiteDatabase {
             return childCountExpression(prefix: prefix, tablePrefix: tablePrefix, allowedKinds: [.file, .symlink, .other])
         case .childFolderCount:
             return childCountExpression(prefix: prefix, tablePrefix: tablePrefix, allowedKinds: [.folder, .package])
+        case .totalChildSize:
+            return totalChildSizeExpression(prefix: prefix, tablePrefix: tablePrefix)
         case .siblingCount:
             return siblingCountExpression(prefix: prefix, tablePrefix: tablePrefix, allowedKinds: nil)
         case .siblingFileCount:
@@ -833,6 +835,22 @@ private final class SQLiteDatabase {
             (CASE
                 WHEN \(prefix)kind IN ('folder', 'package') THEN
                     (SELECT COUNT(1) FROM entries AS child WHERE \(whereClause))
+                ELSE NULL
+            END)
+            """
+    }
+
+    private func totalChildSizeExpression(prefix: String, tablePrefix: String?) -> String {
+        let pathExpression = outerPathExpression(tablePrefix: tablePrefix)
+        return """
+            (CASE
+                WHEN \(prefix)kind IN ('folder', 'package') THEN
+                    (
+                        SELECT COALESCE(SUM(COALESCE(child.byte_size, 0)), 0)
+                        FROM entries AS child
+                        WHERE child.parent = \(pathExpression)
+                            AND child.kind IN ('file', 'other', 'symlink')
+                    )
                 ELSE NULL
             END)
             """

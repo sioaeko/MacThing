@@ -3281,8 +3281,9 @@ expect(
 
 let totalChildSizeHint = SearchEngine.candidateHint(for: SearchRequest(query: "total-child-size:>1kb"))
 expect(
-    totalChildSizeHint.canUseDatabaseCandidates == false,
-    "total-child-size: searches should avoid lossy SQLite candidate prefiltering"
+    totalChildSizeHint.canUseDatabaseCandidates &&
+        totalChildSizeHint.numericFilters.first?.field == .totalChildSize,
+    "total-child-size: searches should be pushed into SQLite candidate hints"
 )
 
 let descendantHint = SearchEngine.candidateHint(for: SearchRequest(query: "descendant:Grandchild"))
@@ -5389,6 +5390,36 @@ do {
     expect(
         childFolderCountCandidates.map(\.path) == [folder.path],
         "SQLite candidate search should apply child-folder-count filters"
+    )
+
+    let totalChildSizeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "total-child-size:12")),
+        limit: 20,
+        from: childCountCandidateDatabaseURL
+    )
+    expect(
+        totalChildSizeCandidates.map(\.path) == [folder.path],
+        "SQLite candidate search should apply total-child-size filters"
+    )
+
+    let nestedTotalChildSizeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "total-child-size:1000")),
+        limit: 20,
+        from: childCountCandidateDatabaseURL
+    )
+    expect(
+        nestedTotalChildSizeCandidates.map(\.path) == [childFolderInFolder.path],
+        "SQLite total-child-size filters should sum direct file children only"
+    )
+
+    let zeroTotalChildSizeCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "total-child-size:0")),
+        limit: 20,
+        from: childCountCandidateDatabaseURL
+    )
+    expect(
+        zeroTotalChildSizeCandidates.isEmpty,
+        "SQLite total-child-size filters should not treat non-containers as zero-size containers"
     )
 
     let siblingCountCandidateDatabaseURL = temporaryDirectory.appending(path: "SiblingCountCandidates.db")
