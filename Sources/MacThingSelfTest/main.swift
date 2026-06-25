@@ -1565,6 +1565,17 @@ expect(
     "nothing: should match no files or folders"
 )
 
+let nothingResponse = SearchEngine.search(
+    request: SearchRequest(query: "nothing:"),
+    in: manyRecentEntries
+)
+expect(
+    nothingResponse.entries.isEmpty &&
+        nothingResponse.totalMatches == 0 &&
+        nothingResponse.diagnostics?.searchedEntryCount == 0,
+    "statically impossible searches should return before scanning entries"
+)
+
 expect(
     SearchEngine.search(query: "Launch !nothing:", in: syntaxEntries).isEmpty == false,
     "!nothing: should behave as a no-op in AND searches"

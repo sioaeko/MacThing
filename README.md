@@ -86,6 +86,8 @@ The current packaged release is available from GitHub:
   to parent/path candidates, reducing slow path scans for common short terms.
 - Path-like or punctuated terms keep substring fallback enabled even when FTS
   fills the first candidate window, preserving exact path fragments.
+- Statically impossible queries such as `nothing:` return before building the
+  full in-memory search context.
 - SQLite candidate seeding also applies supported structured filters such as
   extension, kind/category, file size including `size:unknown`, dates including
   `dm:unknown`, file attributes, media track/year metadata, filesystem identity

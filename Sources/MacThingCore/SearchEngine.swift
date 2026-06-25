@@ -1050,7 +1050,15 @@ public enum SearchEngine {
 
         let parsed = SearchQueryParser.parse(request.query)
         let effectiveRequest = applyingQueryOverrides(request, parsed)
-        let context = SearchContext(entries: entries, options: request.options, buildFullIndexes: buildFullContext)
+
+        if parsed.isNever {
+            return SearchResponse(
+                entries: [],
+                totalMatches: 0,
+                warnings: parsed.warnings,
+                diagnostics: diagnostics(searchedEntryCount: 0)
+            )
+        }
 
         guard !parsed.isEmpty else {
             if shouldCancel() {
@@ -1081,6 +1089,7 @@ public enum SearchEngine {
             )
         }
 
+        let context = SearchContext(entries: entries, options: request.options, buildFullIndexes: buildFullContext)
         var resultWindow = MatchWindow(
             request: effectiveRequest,
             field: effectiveRequest.sortField,
@@ -3476,6 +3485,10 @@ private struct ParsedSearch {
         expression?.isEmpty ?? true
     }
 
+    var isNever: Bool {
+        expression?.isNever ?? false
+    }
+
     func score(entry: FileEntry, options: SearchOptions, context: SearchContext) -> Int? {
         expression?.score(entry: entry, options: options, context: context)
     }
@@ -3495,6 +3508,32 @@ private indirect enum SearchExpression {
             return expressions.allSatisfy(\.isEmpty)
         case let .not(expression):
             return expression.isEmpty
+        }
+    }
+
+    var isNever: Bool {
+        switch self {
+        case let .term(term):
+            return term.isNever
+        case let .and(expressions):
+            return expressions.contains(where: \.isNever)
+        case let .or(expressions):
+            return !expressions.isEmpty && expressions.allSatisfy(\.isNever)
+        case let .not(expression):
+            return expression.isAlways
+        }
+    }
+
+    var isAlways: Bool {
+        switch self {
+        case let .term(term):
+            return term.isAlways
+        case let .and(expressions):
+            return !expressions.isEmpty && expressions.allSatisfy(\.isAlways)
+        case let .or(expressions):
+            return expressions.contains(where: \.isAlways)
+        case let .not(expression):
+            return expression.isNever
         }
     }
 
@@ -3524,6 +3563,14 @@ private indirect enum SearchExpression {
 
 private struct SearchTerm {
     let predicate: SearchPredicate
+
+    var isNever: Bool {
+        predicate.isNever
+    }
+
+    var isAlways: Bool {
+        predicate.isAlways
+    }
 
     func score(entry: FileEntry, options: SearchOptions, context: SearchContext) -> Int? {
         predicate.score(entry: entry, options: options, context: context)
@@ -3709,6 +3756,32 @@ private indirect enum SearchPredicate {
     case formula(FormulaExpression)
     case always
     case never(String)
+
+    var isNever: Bool {
+        switch self {
+        case let .and(predicates):
+            return predicates.contains(where: \.isNever)
+        case let .withOptions(_, predicate):
+            return predicate.isNever
+        case .never:
+            return true
+        default:
+            return false
+        }
+    }
+
+    var isAlways: Bool {
+        switch self {
+        case let .and(predicates):
+            return !predicates.isEmpty && predicates.allSatisfy(\.isAlways)
+        case let .withOptions(_, predicate):
+            return predicate.isAlways
+        case .always:
+            return true
+        default:
+            return false
+        }
+    }
 
     func score(entry: FileEntry, options: SearchOptions, context: SearchContext) -> Int? {
         switch self {
