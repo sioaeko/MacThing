@@ -712,6 +712,22 @@ public struct SearchCandidateFileListSourceFilter: Sendable {
     }
 }
 
+public enum SearchCandidateNameMatchMode: Equatable, Sendable {
+    case equal
+    case prefix
+    case suffix
+}
+
+public struct SearchCandidateNameFilter: Sendable {
+    public let mode: SearchCandidateNameMatchMode
+    public let values: Set<String>
+
+    public init(mode: SearchCandidateNameMatchMode, values: Set<String>) {
+        self.mode = mode
+        self.values = values
+    }
+}
+
 public struct SearchCandidateParentDateFilter: Sendable {
     public let filters: [SearchCandidateDateFilter]
 
@@ -849,6 +865,7 @@ public struct SearchCandidateHint: Sendable {
     public let childFileListFilters: [SearchCandidateChildFileListFilter]
     public let fileListFilters: [SearchCandidateFileListFilter]
     public let fileListSourceFilters: [SearchCandidateFileListSourceFilter]
+    public let nameFilters: [SearchCandidateNameFilter]
     public let parentDateFilters: [SearchCandidateParentDateFilter]
     public let parentSizeFilters: [SearchCandidateParentSizeFilter]
     public let ancestorAttributeFilters: [SearchCandidateAncestorAttributeFilter]
@@ -888,6 +905,7 @@ public struct SearchCandidateHint: Sendable {
         childFileListFilters: [SearchCandidateChildFileListFilter] = [],
         fileListFilters: [SearchCandidateFileListFilter] = [],
         fileListSourceFilters: [SearchCandidateFileListSourceFilter] = [],
+        nameFilters: [SearchCandidateNameFilter] = [],
         parentDateFilters: [SearchCandidateParentDateFilter] = [],
         parentSizeFilters: [SearchCandidateParentSizeFilter] = [],
         ancestorAttributeFilters: [SearchCandidateAncestorAttributeFilter] = [],
@@ -926,6 +944,7 @@ public struct SearchCandidateHint: Sendable {
         self.childFileListFilters = childFileListFilters
         self.fileListFilters = fileListFilters
         self.fileListSourceFilters = fileListSourceFilters
+        self.nameFilters = nameFilters
         self.parentDateFilters = parentDateFilters
         self.parentSizeFilters = parentSizeFilters
         self.ancestorAttributeFilters = ancestorAttributeFilters
@@ -964,6 +983,7 @@ public struct SearchCandidateHint: Sendable {
             !childFileListFilters.isEmpty ||
             !fileListFilters.isEmpty ||
             !fileListSourceFilters.isEmpty ||
+            !nameFilters.isEmpty ||
             !parentDateFilters.isEmpty ||
             !parentSizeFilters.isEmpty ||
             !ancestorAttributeFilters.isEmpty ||
@@ -1193,6 +1213,7 @@ public enum SearchEngine {
         var childFileListFilters: [SearchCandidateChildFileListFilter] = []
         var fileListFilters: [SearchCandidateFileListFilter] = []
         var fileListSourceFilters: [SearchCandidateFileListSourceFilter] = []
+        var nameFilters: [SearchCandidateNameFilter] = []
         var parentDateFilters: [SearchCandidateParentDateFilter] = []
         var parentSizeFilters: [SearchCandidateParentSizeFilter] = []
         var ancestorAttributeFilters: [SearchCandidateAncestorAttributeFilter] = []
@@ -1217,6 +1238,23 @@ public enum SearchEngine {
             let restoredValue = unescapeQuotedListSeparators(value)
             if !restoredValue.isEmpty {
                 terms.append(restoredValue)
+            }
+        }
+
+        func canUseExactTextCandidateFilters() -> Bool {
+            request.options.caseSensitive &&
+                request.options.diacriticSensitive &&
+                !request.options.wholeWordMatching
+        }
+
+        func addNameCandidateHint(value: String, mode: SearchCandidateNameMatchMode) {
+            guard !value.isEmpty else {
+                return
+            }
+            if canUseExactTextCandidateFilters() {
+                nameFilters.append(SearchCandidateNameFilter(mode: mode, values: [value]))
+            } else {
+                addTerm(value)
             }
         }
 
@@ -1266,7 +1304,7 @@ public enum SearchEngine {
                  "diacritics", "nodiacritics",
                  "path", "nopath",
                  "wholeword", "ww", "nowholeword", "noww",
-                 "wfn", "wholefilename", "exact", "nowfn", "nowholefilename",
+                 "nowfn", "nowholefilename",
                  "noregex", "nofileonly", "nofolderonly":
                 guard !value.isEmpty else {
                     return true
@@ -1275,6 +1313,15 @@ public enum SearchEngine {
                     return false
                 }
                 addTerm(value)
+                return true
+            case "wfn", "wholefilename", "exact":
+                guard !value.isEmpty else {
+                    return true
+                }
+                guard !value.contains(":"), !value.contains("*"), !value.contains("?") else {
+                    return false
+                }
+                addNameCandidateHint(value: value, mode: .equal)
                 return true
             case "file", "files":
                 kinds.formUnion([.file, .symlink, .package])
@@ -2074,13 +2121,9 @@ public enum SearchEngine {
                     }
                     numericFilters.append(contentsOf: filter.candidateFilters(field: .extensionFrequency))
                 case "startwith", "startswith", "beginwith", "beginswith", "begin":
-                    if !value.isEmpty {
-                        terms.append(value)
-                    }
+                    addNameCandidateHint(value: value, mode: .prefix)
                 case "endwith", "endswith", "end":
-                    if !value.isEmpty {
-                        terms.append(value)
-                    }
+                    addNameCandidateHint(value: value, mode: .suffix)
                 case "type", "kind", "category":
                     guard let category = FileCategory.parse(value) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
@@ -2419,6 +2462,7 @@ public enum SearchEngine {
             !childFileListFilters.isEmpty ||
             !fileListFilters.isEmpty ||
             !fileListSourceFilters.isEmpty ||
+            !nameFilters.isEmpty ||
             !parentDateFilters.isEmpty ||
             !parentSizeFilters.isEmpty ||
             !ancestorAttributeFilters.isEmpty ||
@@ -2457,6 +2501,7 @@ public enum SearchEngine {
             childFileListFilters: childFileListFilters,
             fileListFilters: fileListFilters,
             fileListSourceFilters: fileListSourceFilters,
+            nameFilters: nameFilters,
             parentDateFilters: parentDateFilters,
             parentSizeFilters: parentSizeFilters,
             ancestorAttributeFilters: ancestorAttributeFilters,

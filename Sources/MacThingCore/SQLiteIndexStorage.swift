@@ -716,6 +716,12 @@ private final class SQLiteDatabase {
             bindings.append(contentsOf: sourceFilter.bindings)
         }
 
+        for filter in hint.nameFilters {
+            let nameFilter = nameFilterClause(prefix: prefix, filter: filter)
+            clauses.append(nameFilter.clause)
+            bindings.append(contentsOf: nameFilter.bindings)
+        }
+
         if !hint.requiredAttributes.isEmpty {
             let rawValue = Int64(hint.requiredAttributes.rawValue)
             clauses.append("(\(prefix)attributes & ?) = ?")
@@ -1073,6 +1079,36 @@ private final class SQLiteDatabase {
         }
 
         return ("(\(matchClauses.joined(separator: " OR ")))", bindings)
+    }
+
+    private func nameFilterClause(
+        prefix: String,
+        filter: SearchCandidateNameFilter
+    ) -> (clause: String, bindings: [SQLiteValue]) {
+        let values = filter.values.filter { !$0.isEmpty }.sorted()
+        guard !values.isEmpty else {
+            return ("1 = 1", [])
+        }
+
+        switch filter.mode {
+        case .equal:
+            return (
+                "\(prefix)name IN (\(placeholders(count: values.count)))",
+                values.map(SQLiteValue.text)
+            )
+        case .prefix:
+            let clauses = Array(repeating: "\(prefix)name LIKE ? ESCAPE '\\'", count: values.count)
+            return (
+                "(\(clauses.joined(separator: " OR ")))",
+                values.map { .text("\(escapeLike($0))%") }
+            )
+        case .suffix:
+            let clauses = Array(repeating: "\(prefix)name LIKE ? ESCAPE '\\'", count: values.count)
+            return (
+                "(\(clauses.joined(separator: " OR ")))",
+                values.map { .text("%\(escapeLike($0))") }
+            )
+        }
     }
 
     private func placeholders(count: Int) -> String {

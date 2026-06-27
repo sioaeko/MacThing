@@ -3252,6 +3252,40 @@ expect(
 )
 
 let exactParentChildOptions = SearchOptions(caseSensitive: true, diacriticSensitive: true)
+
+let exactStartWithHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "start-with:Launch", options: exactParentChildOptions)
+)
+expect(
+    exactStartWithHint.canUseDatabaseCandidates &&
+        exactStartWithHint.terms.isEmpty &&
+        exactStartWithHint.nameFilters.first?.mode == .prefix &&
+        exactStartWithHint.nameFilters.first?.values == Set(["Launch"]),
+    "exact start-with filters should be pushed into SQLite name-prefix candidate hints"
+)
+
+let exactEndWithHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "end-with:.md", options: exactParentChildOptions)
+)
+expect(
+    exactEndWithHint.canUseDatabaseCandidates &&
+        exactEndWithHint.terms.isEmpty &&
+        exactEndWithHint.nameFilters.first?.mode == .suffix &&
+        exactEndWithHint.nameFilters.first?.values == Set([".md"]),
+    "exact end-with filters should be pushed into SQLite name-suffix candidate hints"
+)
+
+let exactWholeFilenameHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "exact:Launch.md", options: exactParentChildOptions)
+)
+expect(
+    exactWholeFilenameHint.canUseDatabaseCandidates &&
+        exactWholeFilenameHint.terms.isEmpty &&
+        exactWholeFilenameHint.nameFilters.first?.mode == .equal &&
+        exactWholeFilenameHint.nameFilters.first?.values == Set(["Launch.md"]),
+    "exact whole-filename filters should be pushed into SQLite name-equality candidate hints"
+)
+
 let exactParentChildHint = SearchEngine.candidateHint(
     for: SearchRequest(query: "parent-child:Empty", options: exactParentChildOptions)
 )
@@ -5690,6 +5724,109 @@ do {
     expect(
         parentOnlyCandidates.contains { $0.path == parentOnlyCandidate.path },
         "SQLite LIKE fallback should preserve short parent/path substring candidates"
+    )
+
+    let namePrefixTarget = FileEntry(
+        path: "/Users/me/NameFilters/NeedlePrefix.namefilter",
+        name: "NeedlePrefix.namefilter",
+        parent: "/Users/me/NameFilters",
+        kind: .file,
+        byteSize: 256,
+        modifiedAt: Date(timeIntervalSince1970: 2_710),
+        indexedAt: Date(timeIntervalSince1970: 2_710)
+    )
+    let namePrefixDecoy = FileEntry(
+        path: "/Users/me/NameFilters/Other NeedlePrefix.namefilter",
+        name: "Other NeedlePrefix.namefilter",
+        parent: "/Users/me/NameFilters",
+        kind: .file,
+        byteSize: 257,
+        modifiedAt: Date(timeIntervalSince1970: 2_711),
+        indexedAt: Date(timeIntervalSince1970: 2_711)
+    )
+    let nameSuffixTarget = FileEntry(
+        path: "/Users/me/NameFilters/Report.needlesuffix",
+        name: "Report.needlesuffix",
+        parent: "/Users/me/NameFilters",
+        kind: .file,
+        byteSize: 258,
+        modifiedAt: Date(timeIntervalSince1970: 2_712),
+        indexedAt: Date(timeIntervalSince1970: 2_712)
+    )
+    let nameSuffixDecoy = FileEntry(
+        path: "/Users/me/NameFilters/Report.needlesuffix.old",
+        name: "Report.needlesuffix.old",
+        parent: "/Users/me/NameFilters",
+        kind: .file,
+        byteSize: 259,
+        modifiedAt: Date(timeIntervalSince1970: 2_713),
+        indexedAt: Date(timeIntervalSince1970: 2_713)
+    )
+    let exactNameTarget = FileEntry(
+        path: "/Users/me/NameFilters/Exact Needle.namefilter",
+        name: "Exact Needle.namefilter",
+        parent: "/Users/me/NameFilters",
+        kind: .file,
+        byteSize: 260,
+        modifiedAt: Date(timeIntervalSince1970: 2_714),
+        indexedAt: Date(timeIntervalSince1970: 2_714)
+    )
+    let exactNameDecoy = FileEntry(
+        path: "/Users/me/NameFilters/Exact Needle Copy.namefilter",
+        name: "Exact Needle Copy.namefilter",
+        parent: "/Users/me/NameFilters",
+        kind: .file,
+        byteSize: 261,
+        modifiedAt: Date(timeIntervalSince1970: 2_715),
+        indexedAt: Date(timeIntervalSince1970: 2_715)
+    )
+    try IndexStorage.upsert(
+        entries: [
+            namePrefixTarget,
+            namePrefixDecoy,
+            nameSuffixTarget,
+            nameSuffixDecoy,
+            exactNameTarget,
+            exactNameDecoy
+        ],
+        rootPath: temporaryDirectory.path,
+        to: databaseURL
+    )
+
+    let namePrefixCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "start-with:NeedlePrefix", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: databaseURL
+    )
+    expect(
+        namePrefixCandidates.map(\.path) == [namePrefixTarget.path],
+        "SQLite candidate search should apply exact name-prefix filters"
+    )
+
+    let nameSuffixCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "end-with:.needlesuffix", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: databaseURL
+    )
+    expect(
+        nameSuffixCandidates.map(\.path) == [nameSuffixTarget.path],
+        "SQLite candidate search should apply exact name-suffix filters"
+    )
+
+    let exactNameCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "exact:\"Exact Needle.namefilter\"", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: databaseURL
+    )
+    expect(
+        exactNameCandidates.map(\.path) == [exactNameTarget.path],
+        "SQLite candidate search should apply exact whole-filename filters"
     )
 
     let candidates = try IndexStorage.candidateEntries(terms: ["Launch"], limit: 20, from: databaseURL)
