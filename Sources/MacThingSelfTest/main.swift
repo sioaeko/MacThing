@@ -3199,6 +3199,16 @@ expect(
     "absolute parent filters should be pushed into SQLite candidate hints"
 )
 
+let parentListHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "launch parent:/Users/me/Documents;/Users/me/Pictures")
+)
+expect(
+    parentListHint.canUseDatabaseCandidates &&
+        parentListHint.terms == ["launch"] &&
+        parentListHint.parentPaths == ["/Users/me/Documents", "/Users/me/Pictures"],
+    "absolute parent value lists should be pushed into SQLite candidate hints"
+)
+
 let parentPathHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch parent-path:/Users/me/Documents"))
 expect(
     parentPathHint.canUseDatabaseCandidates &&
@@ -6080,6 +6090,19 @@ do {
     expect(
         Set(parentLaunchCandidates.map(\.path)) == Set([document.path, folder.path]),
         "SQLite candidate search should apply direct parent filters"
+    )
+
+    let parentListLaunchHint = SearchEngine.candidateHint(
+        for: SearchRequest(query: "launch parent:/Users/me/Documents;/Users/me/Pictures")
+    )
+    let parentListLaunchCandidates = try IndexStorage.candidateEntries(
+        hint: parentListLaunchHint,
+        limit: 20,
+        from: databaseURL
+    )
+    expect(
+        Set(parentListLaunchCandidates.map(\.path)) == Set([photo.path, document.path, folder.path]),
+        "SQLite candidate search should apply direct parent value-list filters"
     )
 
     let parentPathLaunchHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch parent-path:/Users/me/Documents"))

@@ -99,7 +99,7 @@ The current packaged release is available from GitHub:
   (`filelistfilename:`) filters, exact file-list source/value filters, exact
   name/stem/path-part contains and name prefix/suffix/equality filters, exact
   existence filters, exact path-list and path-list value-list filters, empty-entry (`empty:`) filters,
-  known shell-folder path filters, exact direct-parent filters, direct-child count,
+  known shell-folder path filters, exact direct-parent/value-list filters, direct-child count,
   child attr/date/run-count/size,
   ancestor attribute filters, ancestor-child presence/exact filters, child
   presence/exact filters, exact child file-list filters, descendant

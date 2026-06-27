@@ -1307,6 +1307,27 @@ public enum SearchEngine {
             return true
         }
 
+        func addParentPathCandidateHint(rawValue: String, value: String) -> Bool {
+            let values: [String]
+            if rawValue.contains(";") {
+                guard let parsedValues = semicolonDelimitedValues(from: rawValue) else {
+                    return false
+                }
+                values = parsedValues
+            } else {
+                values = [value]
+            }
+
+            for rawParent in values {
+                let normalizedParent = normalizedFolderPath(rawParent)
+                guard isAbsoluteSearchPath(normalizedParent) else {
+                    return false
+                }
+                parentPaths.insert(normalizedParent)
+            }
+            return true
+        }
+
         func isCountDirective(_ rawToken: String) -> Bool {
             guard let colonIndex = rawToken.firstIndex(of: ":") else {
                 return false
@@ -1833,7 +1854,8 @@ public enum SearchEngine {
                    !supportsFileListSourcePresence {
                     switch function {
                     case "ext", "extension", "type", "kind", "category",
-                         "pathlist", "fullpathlist":
+                         "pathlist", "fullpathlist",
+                         "parent", "infolder", "nosubfolders":
                         break
                     default:
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
@@ -1862,10 +1884,7 @@ public enum SearchEngine {
                 case "stem", "namepart":
                     addNameCandidateHint(value: value, field: .namePart, mode: .contains)
                 case "parent", "infolder", "nosubfolders":
-                    let normalizedParent = normalizedFolderPath(value)
-                    if isAbsoluteSearchPath(normalizedParent) {
-                        parentPaths.insert(normalizedParent)
-                    } else {
+                    guard addParentPathCandidateHint(rawValue: rawValue, value: value) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
                 case "parentpath", "parentfullpath", "parentname", "ancestor", "ancestorname":
