@@ -981,11 +981,22 @@ final class SearchStore: ObservableObject {
     }
 
     func setAppShortcutChoice(_ choice: AppShortcutChoice, for action: AppShortcutAction) {
-        appShortcutSettings.set(choice, for: action)
+        let clearedActions = appShortcutSettings.set(choice, for: action)
         saveSettings()
-        statusText = choice == .disabled
+        let baseStatus = choice == .disabled
             ? "\(action.displayName) shortcut disabled"
             : "\(action.displayName): \(choice.displayName)"
+        statusText = shortcutStatus(baseStatus, clearedActions: clearedActions)
+    }
+
+    func resetAppShortcutChoice(for action: AppShortcutAction) {
+        let clearedActions = appShortcutSettings.reset(action)
+        saveSettings()
+        let defaultChoice = action.defaultChoice
+        let baseStatus = defaultChoice == .disabled
+            ? "\(action.displayName) reset to Disabled"
+            : "\(action.displayName) reset to \(defaultChoice.displayName)"
+        statusText = shortcutStatus(baseStatus, clearedActions: clearedActions)
     }
 
     func resetShortcutSettings() {
@@ -1000,6 +1011,20 @@ final class SearchStore: ObservableObject {
         appShortcutSettings = .defaults
         saveSettings()
         statusText = "Shortcuts reset"
+    }
+
+    private func shortcutStatus(
+        _ baseStatus: String,
+        clearedActions: [AppShortcutAction]
+    ) -> String {
+        guard !clearedActions.isEmpty else {
+            return baseStatus
+        }
+
+        let names = clearedActions
+            .map(\.displayName)
+            .joined(separator: ", ")
+        return "\(baseStatus); cleared from \(names)"
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {

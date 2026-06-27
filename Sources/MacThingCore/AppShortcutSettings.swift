@@ -63,7 +63,7 @@ public enum AppShortcutAction: String, Codable, CaseIterable, Identifiable, Send
     public var settingDetail: String {
         switch self {
         case .quickSearch:
-            return "Open the floating search palette"
+            return "Open the floating search palette while MacThing is active"
         case .showWindow:
             return "Bring the main MacThing window forward"
         case .openSelected:
@@ -89,6 +89,10 @@ public enum AppShortcutAction: String, Codable, CaseIterable, Identifiable, Send
         case .exportVisibleResults:
             return "Export the current result list"
         }
+    }
+
+    public var defaultChoice: AppShortcutChoice {
+        AppShortcutSettings.defaults.choice(for: self)
     }
 
     public var availableChoices: [AppShortcutChoice] {
@@ -730,9 +734,13 @@ public struct AppShortcutSettings: Codable, Hashable, Sendable {
         }
     }
 
-    public mutating func set(_ choice: AppShortcutChoice, for action: AppShortcutAction) {
+    @discardableResult
+    public mutating func set(_ choice: AppShortcutChoice, for action: AppShortcutAction) -> [AppShortcutAction] {
+        let clearedDuplicates: [AppShortcutAction]
         if choice != .disabled {
-            clearDuplicate(choice, except: action)
+            clearedDuplicates = clearDuplicate(choice, except: action)
+        } else {
+            clearedDuplicates = []
         }
 
         switch action {
@@ -763,6 +771,8 @@ public struct AppShortcutSettings: Codable, Hashable, Sendable {
         case .exportVisibleResults:
             exportVisibleResults = choice
         }
+
+        return clearedDuplicates
     }
 
     public func setting(_ choice: AppShortcutChoice, for action: AppShortcutAction) -> AppShortcutSettings {
@@ -771,13 +781,28 @@ public struct AppShortcutSettings: Codable, Hashable, Sendable {
         return settings
     }
 
-    private mutating func clearDuplicate(_ choice: AppShortcutChoice, except action: AppShortcutAction) {
+    public func isDefault(for action: AppShortcutAction) -> Bool {
+        choice(for: action) == action.defaultChoice
+    }
+
+    @discardableResult
+    public mutating func reset(_ action: AppShortcutAction) -> [AppShortcutAction] {
+        set(action.defaultChoice, for: action)
+    }
+
+    private mutating func clearDuplicate(
+        _ choice: AppShortcutChoice,
+        except action: AppShortcutAction
+    ) -> [AppShortcutAction] {
+        var clearedActions: [AppShortcutAction] = []
         for existingAction in AppShortcutAction.allCases where existingAction != action {
             guard self.choice(for: existingAction) == choice else {
                 continue
             }
             setDirect(.disabled, for: existingAction)
+            clearedActions.append(existingAction)
         }
+        return clearedActions
     }
 
     private mutating func setDirect(_ choice: AppShortcutChoice, for action: AppShortcutAction) {

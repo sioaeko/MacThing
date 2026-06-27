@@ -43,12 +43,39 @@ expect(
         defaultShortcuts.choice(for: .reindex) == .commandShiftR,
     "app shortcuts should keep existing default command mappings"
 )
+expect(
+    AppShortcutAction.quickSearch.defaultChoice == .optionSpace &&
+        AppShortcutAction.showWindow.defaultChoice == .command0 &&
+        AppShortcutAction.openSelected.defaultChoice == .disabled,
+    "shortcut actions should expose their default mapping"
+)
+expect(
+    defaultShortcuts.isDefault(for: .quickSearch) &&
+        defaultShortcuts.isDefault(for: .openSelected),
+    "default shortcut settings should report default rows"
+)
 
-let reassignedShortcuts = defaultShortcuts.setting(.commandShiftR, for: .quickSearch)
+var reassignedShortcuts = defaultShortcuts
+let clearedReassignedShortcuts = reassignedShortcuts.set(.commandShiftR, for: .quickSearch)
 expect(
     reassignedShortcuts.choice(for: .quickSearch) == .commandShiftR &&
-        reassignedShortcuts.choice(for: .reindex) == .disabled,
-    "app shortcut settings should clear duplicate command mappings"
+        reassignedShortcuts.choice(for: .reindex) == .disabled &&
+        clearedReassignedShortcuts == [.reindex],
+    "app shortcut settings should report and clear duplicate command mappings"
+)
+expect(
+    !reassignedShortcuts.isDefault(for: .quickSearch),
+    "custom shortcut rows should report non-default mappings"
+)
+
+var resetDuplicateShortcuts = AppShortcutSettings.defaults.setting(.command0, for: .quickSearch)
+let resetDuplicateClearedActions = resetDuplicateShortcuts.reset(.showWindow)
+expect(
+    resetDuplicateShortcuts.choice(for: .showWindow) == .command0 &&
+        resetDuplicateShortcuts.choice(for: .quickSearch) == .disabled &&
+        resetDuplicateShortcuts.isDefault(for: .showWindow) &&
+        resetDuplicateClearedActions == [.quickSearch],
+    "resetting one shortcut should restore its default and clear duplicate mappings"
 )
 
 let customShortcut = AppShortcutChoice(key: .m, modifiers: [.command, .option])

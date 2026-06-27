@@ -39,10 +39,13 @@ private struct ShortcutSettingsPane: View {
                         title: "Quick Search",
                         detail: "Open the floating search palette from anywhere",
                         value: store.globalHotkeyChoice.shortcut,
+                        defaultValue: GlobalHotkeyChoice.recommended.shortcut,
                         mode: .globalHotkey,
                         presets: GlobalHotkeyChoice.allCases.map(\.shortcut)
                     ) { choice in
                         store.setGlobalHotkeyChoice(GlobalHotkeyChoice(shortcut: choice))
+                    } onReset: {
+                        store.setGlobalHotkeyChoice(GlobalHotkeyChoice.recommended)
                     }
                 }
 
@@ -60,10 +63,13 @@ private struct ShortcutSettingsPane: View {
                                     title: action.displayName,
                                     detail: action.settingDetail,
                                     value: store.appShortcutSettings.choice(for: action),
+                                    defaultValue: action.defaultChoice,
                                     mode: .menuCommand,
                                     presets: action.availableChoices
                                 ) { choice in
                                     store.setAppShortcutChoice(choice, for: action)
+                                } onReset: {
+                                    store.resetAppShortcutChoice(for: action)
                                 }
 
                                 if index < actions.index(before: actions.endIndex) {
@@ -83,12 +89,16 @@ private struct ShortcutSettingsPane: View {
 
 private struct ShortcutMappingHeader: View {
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 12) {
             Text("Command")
                 .frame(maxWidth: .infinity, alignment: .leading)
+            Text("Default")
+                .frame(width: 128, alignment: .leading)
             Text("Shortcut")
                 .frame(width: 172, alignment: .leading)
             Text("Preset")
+                .frame(width: 28, alignment: .center)
+            Text("Reset")
                 .frame(width: 28, alignment: .center)
         }
         .font(.caption.weight(.semibold))
@@ -103,31 +113,49 @@ private struct ShortcutMappingRow: View {
     let title: String
     let detail: String
     let value: AppShortcutChoice
+    let defaultValue: AppShortcutChoice
     let mode: ShortcutRecorder.Mode
     let presets: [AppShortcutChoice]
     let onChange: (AppShortcutChoice) -> Void
+    let onReset: () -> Void
 
     init(
         title: String,
         detail: String,
         value: AppShortcutChoice,
+        defaultValue: AppShortcutChoice,
         mode: ShortcutRecorder.Mode,
         presets: [AppShortcutChoice],
-        onChange: @escaping (AppShortcutChoice) -> Void
+        onChange: @escaping (AppShortcutChoice) -> Void,
+        onReset: @escaping () -> Void
     ) {
         self.title = title
         self.detail = detail
         self.value = value
+        self.defaultValue = defaultValue
         self.mode = mode
         self.presets = presets
         self.onChange = onChange
+        self.onReset = onReset
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 16) {
+        let isDefault = value == defaultValue
+
+        HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
+                HStack(spacing: 5) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+
+                    if !isDefault {
+                        Image(systemName: "pencil.circle.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.blue)
+                            .help("Customized")
+                    }
+                }
+
                 Text(detail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -135,6 +163,14 @@ private struct ShortcutMappingRow: View {
             }
 
             Spacer(minLength: 16)
+
+            Text(defaultValue.displayName)
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundStyle(isDefault ? .secondary : .primary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(width: 128, alignment: .leading)
+                .help("Default: \(defaultValue.displayName)")
 
             ShortcutRecorder(value: value, mode: mode, onChange: onChange)
                 .frame(width: 172, height: 28)
@@ -165,6 +201,15 @@ private struct ShortcutMappingRow: View {
             .menuStyle(.borderlessButton)
             .frame(width: 28)
             .help("Choose a preset shortcut")
+
+            Button(action: onReset) {
+                Image(systemName: "arrow.uturn.backward.circle")
+                    .frame(width: 20, height: 20)
+            }
+            .buttonStyle(.borderless)
+            .disabled(isDefault)
+            .frame(width: 28)
+            .help("Reset this shortcut")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 9)
