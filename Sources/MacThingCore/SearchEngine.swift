@@ -713,6 +713,7 @@ public struct SearchCandidateFileListSourceFilter: Sendable {
 }
 
 public enum SearchCandidateNameMatchMode: Equatable, Sendable {
+    case contains
     case equal
     case prefix
     case suffix
@@ -1794,7 +1795,9 @@ public enum SearchEngine {
                 switch function {
                 case "everything", "nop":
                     continue
-                case "name", "filename", "basename", "path", "fullpath", "pathandname",
+                case "name", "filename", "basename":
+                    addNameCandidateHint(value: value, mode: .contains)
+                case "path", "fullpath", "pathandname",
                      "pathname", "parsefullpath", "parsefilename", "parsepathandname",
                      "parsepathname", "pathpart", "pathparts", "pp", "location",
                      "stem", "namepart":

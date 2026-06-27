@@ -1091,6 +1091,12 @@ private final class SQLiteDatabase {
         }
 
         switch filter.mode {
+        case .contains:
+            let clauses = Array(repeating: "instr(\(prefix)name, ?) > 0", count: values.count)
+            return (
+                "(\(clauses.joined(separator: " OR ")))",
+                values.map(SQLiteValue.text)
+            )
         case .equal:
             return (
                 "\(prefix)name IN (\(placeholders(count: values.count)))",

@@ -3253,6 +3253,17 @@ expect(
 
 let exactParentChildOptions = SearchOptions(caseSensitive: true, diacriticSensitive: true)
 
+let exactNameContainsHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "name:NeedlePrefix", options: exactParentChildOptions)
+)
+expect(
+    exactNameContainsHint.canUseDatabaseCandidates &&
+        exactNameContainsHint.terms.isEmpty &&
+        exactNameContainsHint.nameFilters.first?.mode == .contains &&
+        exactNameContainsHint.nameFilters.first?.values == Set(["NeedlePrefix"]),
+    "exact name: filters should be pushed into SQLite name-contains candidate hints"
+)
+
 let exactStartWithHint = SearchEngine.candidateHint(
     for: SearchRequest(query: "start-with:Launch", options: exactParentChildOptions)
 )
@@ -5803,6 +5814,18 @@ do {
     expect(
         namePrefixCandidates.map(\.path) == [namePrefixTarget.path],
         "SQLite candidate search should apply exact name-prefix filters"
+    )
+
+    let nameContainsCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "name:NeedlePrefix", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: databaseURL
+    )
+    expect(
+        Set(nameContainsCandidates.map(\.path)) == Set([namePrefixTarget.path, namePrefixDecoy.path]),
+        "SQLite candidate search should apply exact name-contains filters"
     )
 
     let nameSuffixCandidates = try IndexStorage.candidateEntries(
