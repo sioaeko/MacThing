@@ -4182,8 +4182,10 @@ let exactListedPathListHint = SearchEngine.candidateHint(
     )
 )
 expect(
-    exactListedPathListHint.canUseDatabaseCandidates == false,
-    "semicolon path-list: searches should avoid lossy SQLite candidate prefiltering"
+    exactListedPathListHint.canUseDatabaseCandidates &&
+        exactListedPathListHint.pathListFilters.first?.paths ==
+            Set(["/Users/me/Pictures/Launch.JPG", "/Users/me/Documents/Launch"]),
+    "exact semicolon path-list: searches should be pushed into SQLite candidate hints"
 )
 
 let substitutionPathListHint = SearchEngine.candidateHint(
@@ -6327,6 +6329,21 @@ do {
     expect(
         exactPathListCandidates.map(\.path) == [pathMatch.path],
         "SQLite candidate search should apply exact path-list filters"
+    )
+
+    let exactListedPathListCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(
+                query: "path-list:/Users/me/project/archive/readme.txt;/Users/me/Pictures/Launch.JPG",
+                options: exactParentChildOptions
+            )
+        ),
+        limit: 20,
+        from: pathListCandidateDatabaseURL
+    )
+    expect(
+        Set(exactListedPathListCandidates.map(\.path)) == Set([pathMatch.path, photo.path]),
+        "SQLite candidate search should apply exact semicolon path-list filters"
     )
 
     let exactFullPathListCandidates = try IndexStorage.candidateEntries(

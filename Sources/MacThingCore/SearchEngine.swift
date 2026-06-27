@@ -1832,7 +1832,8 @@ public enum SearchEngine {
                    supportsSemicolonSearchFunctionValueList(function: function),
                    !supportsFileListSourcePresence {
                     switch function {
-                    case "ext", "extension", "type", "kind", "category":
+                    case "ext", "extension", "type", "kind", "category",
+                         "pathlist", "fullpathlist":
                         break
                     default:
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
