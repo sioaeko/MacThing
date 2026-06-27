@@ -2786,6 +2786,14 @@ expect(
     "extension filters should be pushed into SQLite candidate hints"
 )
 
+let extensionListHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch ext:jpg;jpeg"))
+expect(
+    extensionListHint.canUseDatabaseCandidates &&
+        extensionListHint.terms == ["launch"] &&
+        extensionListHint.extensions == ["jpeg", "jpg"],
+    "semicolon extension lists should be pushed into SQLite candidate hints"
+)
+
 let noExtensionHint = SearchEngine.candidateHint(for: SearchRequest(query: "ext:"))
 expect(
     noExtensionHint.canUseDatabaseCandidates &&
@@ -5977,6 +5985,16 @@ do {
     expect(
         jpgCandidates.map(\.path) == [photo.path],
         "SQLite candidate search should apply extension filters"
+    )
+
+    let extensionListCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "launch ext:jpg;jpeg")),
+        limit: 20,
+        from: databaseURL
+    )
+    expect(
+        extensionListCandidates.map(\.path) == [photo.path],
+        "SQLite candidate search should apply semicolon extension-list filters"
     )
 
     let wildcardJPGHint = SearchEngine.candidateHint(for: SearchRequest(query: "*.jpg"))

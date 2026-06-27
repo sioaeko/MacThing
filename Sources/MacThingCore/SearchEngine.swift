@@ -1795,7 +1795,12 @@ public enum SearchEngine {
                 if rawValue.contains(";"),
                    supportsSemicolonSearchFunctionValueList(function: function),
                    !supportsFileListSourcePresence {
-                    return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    switch function {
+                    case "ext", "extension":
+                        break
+                    default:
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
                 }
                 let value = unescapeQuotedListSeparators(rawValue)
 
