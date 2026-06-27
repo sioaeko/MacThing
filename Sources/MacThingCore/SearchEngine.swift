@@ -702,6 +702,16 @@ public struct SearchCandidateFileListFilter: Sendable {
     }
 }
 
+public struct SearchCandidateFileListSourceFilter: Sendable {
+    public let nameValues: Set<String>
+    public let pathValues: Set<String>
+
+    public init(nameValues: Set<String>, pathValues: Set<String>) {
+        self.nameValues = nameValues
+        self.pathValues = pathValues
+    }
+}
+
 public struct SearchCandidateParentDateFilter: Sendable {
     public let filters: [SearchCandidateDateFilter]
 
@@ -838,6 +848,7 @@ public struct SearchCandidateHint: Sendable {
     public let childAttributeFilters: [SearchCandidateChildAttributeFilter]
     public let childFileListFilters: [SearchCandidateChildFileListFilter]
     public let fileListFilters: [SearchCandidateFileListFilter]
+    public let fileListSourceFilters: [SearchCandidateFileListSourceFilter]
     public let parentDateFilters: [SearchCandidateParentDateFilter]
     public let parentSizeFilters: [SearchCandidateParentSizeFilter]
     public let ancestorAttributeFilters: [SearchCandidateAncestorAttributeFilter]
@@ -876,6 +887,7 @@ public struct SearchCandidateHint: Sendable {
         childAttributeFilters: [SearchCandidateChildAttributeFilter] = [],
         childFileListFilters: [SearchCandidateChildFileListFilter] = [],
         fileListFilters: [SearchCandidateFileListFilter] = [],
+        fileListSourceFilters: [SearchCandidateFileListSourceFilter] = [],
         parentDateFilters: [SearchCandidateParentDateFilter] = [],
         parentSizeFilters: [SearchCandidateParentSizeFilter] = [],
         ancestorAttributeFilters: [SearchCandidateAncestorAttributeFilter] = [],
@@ -913,6 +925,7 @@ public struct SearchCandidateHint: Sendable {
         self.childAttributeFilters = childAttributeFilters
         self.childFileListFilters = childFileListFilters
         self.fileListFilters = fileListFilters
+        self.fileListSourceFilters = fileListSourceFilters
         self.parentDateFilters = parentDateFilters
         self.parentSizeFilters = parentSizeFilters
         self.ancestorAttributeFilters = ancestorAttributeFilters
@@ -950,6 +963,7 @@ public struct SearchCandidateHint: Sendable {
             !childAttributeFilters.isEmpty ||
             !childFileListFilters.isEmpty ||
             !fileListFilters.isEmpty ||
+            !fileListSourceFilters.isEmpty ||
             !parentDateFilters.isEmpty ||
             !parentSizeFilters.isEmpty ||
             !ancestorAttributeFilters.isEmpty ||
@@ -1178,6 +1192,7 @@ public enum SearchEngine {
         var childAttributeFilters: [SearchCandidateChildAttributeFilter] = []
         var childFileListFilters: [SearchCandidateChildFileListFilter] = []
         var fileListFilters: [SearchCandidateFileListFilter] = []
+        var fileListSourceFilters: [SearchCandidateFileListSourceFilter] = []
         var parentDateFilters: [SearchCandidateParentDateFilter] = []
         var parentSizeFilters: [SearchCandidateParentSizeFilter] = []
         var ancestorAttributeFilters: [SearchCandidateAncestorAttributeFilter] = []
@@ -1614,6 +1629,34 @@ public enum SearchEngine {
             }
 
             fileListFilters.append(SearchCandidateFileListFilter(nameValues: nameValues, pathValues: pathValues))
+            return true
+        }
+
+        func addFileListSourceCandidateHint(rawValue: String) -> Bool {
+            let values = parseDelimitedList(rawValue)
+            guard !values.isEmpty else {
+                requiresFileListSource = true
+                return true
+            }
+
+            guard request.options.caseSensitive,
+                  request.options.diacriticSensitive,
+                  values.allSatisfy({ !$0.contains("$") && !$0.contains("*") && !$0.contains("?") }) else {
+                requiresFileListSource = true
+                return true
+            }
+
+            var nameValues = Set<String>()
+            var pathValues = Set<String>()
+            for value in values {
+                if value.contains("/") || value.contains("\\") {
+                    pathValues.insert(normalizedFolderPath(value.replacingOccurrences(of: "\\", with: "/")))
+                } else {
+                    nameValues.insert(value)
+                }
+            }
+
+            fileListSourceFilters.append(SearchCandidateFileListSourceFilter(nameValues: nameValues, pathValues: pathValues))
             return true
         }
 
@@ -2220,7 +2263,9 @@ public enum SearchEngine {
                 case "frn":
                     fileReferenceFilter = makeFileReferenceFilter(for: value)
                 case "filelistfilename", "filelistname", "filelistpath":
-                    requiresFileListSource = true
+                    guard addFileListSourceCandidateHint(rawValue: rawValue) else {
+                        return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
+                    }
                 case "root":
                     guard !isExplicitFalseBoolean(value) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
@@ -2373,6 +2418,7 @@ public enum SearchEngine {
             !childAttributeFilters.isEmpty ||
             !childFileListFilters.isEmpty ||
             !fileListFilters.isEmpty ||
+            !fileListSourceFilters.isEmpty ||
             !parentDateFilters.isEmpty ||
             !parentSizeFilters.isEmpty ||
             !ancestorAttributeFilters.isEmpty ||
@@ -2410,6 +2456,7 @@ public enum SearchEngine {
             childAttributeFilters: childAttributeFilters,
             childFileListFilters: childFileListFilters,
             fileListFilters: fileListFilters,
+            fileListSourceFilters: fileListSourceFilters,
             parentDateFilters: parentDateFilters,
             parentSizeFilters: parentSizeFilters,
             ancestorAttributeFilters: ancestorAttributeFilters,

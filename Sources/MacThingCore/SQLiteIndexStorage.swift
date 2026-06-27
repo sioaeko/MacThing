@@ -710,6 +710,12 @@ private final class SQLiteDatabase {
             bindings.append(contentsOf: fileListFilter.bindings)
         }
 
+        for filter in hint.fileListSourceFilters {
+            let sourceFilter = fileListSourceFilterClause(prefix: prefix, filter: filter)
+            clauses.append(sourceFilter.clause)
+            bindings.append(contentsOf: sourceFilter.bindings)
+        }
+
         if !hint.requiredAttributes.isEmpty {
             let rawValue = Int64(hint.requiredAttributes.rawValue)
             clauses.append("(\(prefix)attributes & ?) = ?")
@@ -1032,6 +1038,38 @@ private final class SQLiteDatabase {
 
         guard !matchClauses.isEmpty else {
             return ("1 = 1", [])
+        }
+
+        return ("(\(matchClauses.joined(separator: " OR ")))", bindings)
+    }
+
+    private func fileListSourceFilterClause(
+        prefix: String,
+        filter: SearchCandidateFileListSourceFilter
+    ) -> (clause: String, bindings: [SQLiteValue]) {
+        var matchClauses: [String] = []
+        var bindings: [SQLiteValue] = []
+
+        if !filter.nameValues.isEmpty {
+            let values = filter.nameValues.sorted()
+            matchClauses.append("\(prefix)file_list_name IN (\(placeholders(count: values.count)))")
+            bindings.append(contentsOf: values.map(SQLiteValue.text))
+
+            for value in values {
+                matchClauses.append("(\(prefix)file_list_path = ? OR \(prefix)file_list_path LIKE ? ESCAPE '\\')")
+                bindings.append(.text(value))
+                bindings.append(.text("%/\(escapeLike(value))"))
+            }
+        }
+
+        if !filter.pathValues.isEmpty {
+            let values = filter.pathValues.sorted()
+            matchClauses.append("\(prefix)file_list_path IN (\(placeholders(count: values.count)))")
+            bindings.append(contentsOf: values.map(SQLiteValue.text))
+        }
+
+        guard !matchClauses.isEmpty else {
+            return ("(\(prefix)file_list_name IS NOT NULL AND \(prefix)file_list_path IS NOT NULL)", [])
         }
 
         return ("(\(matchClauses.joined(separator: " OR ")))", bindings)

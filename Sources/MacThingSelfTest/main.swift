@@ -3858,8 +3858,32 @@ expect(
 let fileListFilenameHint = SearchEngine.candidateHint(for: SearchRequest(query: "filelistfilename:Offline.efu"))
 expect(
     fileListFilenameHint.canUseDatabaseCandidates &&
-        fileListFilenameHint.requiresFileListSource,
+        fileListFilenameHint.requiresFileListSource &&
+        fileListFilenameHint.fileListSourceFilters.isEmpty,
     "filelistfilename: searches should be narrowed to file-list source entries"
+)
+
+let exactFileListFilenameHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "filelistfilename:Offline.efu", options: exactParentChildOptions)
+)
+expect(
+    exactFileListFilenameHint.canUseDatabaseCandidates &&
+        exactFileListFilenameHint.fileListSourceFilters.first?.nameValues == Set(["Offline.efu"]),
+    "exact filelistfilename: source names should be pushed into SQLite candidate hints"
+)
+
+let exactFileListFilenamePathHint = SearchEngine.candidateHint(
+    for: SearchRequest(
+        query: "filelistfilename:\"/Users/me/File Lists/Offline.efu\"",
+        options: exactParentChildOptions
+    )
+)
+expect(
+    exactFileListFilenamePathHint.canUseDatabaseCandidates &&
+        exactFileListFilenamePathHint.fileListSourceFilters.first?.pathValues == Set([
+            "/Users/me/File Lists/Offline.efu"
+        ]),
+    "exact filelistfilename: source paths should be pushed into SQLite candidate hints"
 )
 
 let fileListFilenameListHint = SearchEngine.candidateHint(
@@ -3869,6 +3893,18 @@ expect(
     fileListFilenameListHint.canUseDatabaseCandidates &&
         fileListFilenameListHint.requiresFileListSource,
     "filelistfilename: value lists should preserve file-list source candidate filters"
+)
+
+let exactFileListFilenameListHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "filelistfilename:Offline.efu;Archive.efu", options: exactParentChildOptions)
+)
+expect(
+    exactFileListFilenameListHint.canUseDatabaseCandidates &&
+        exactFileListFilenameListHint.fileListSourceFilters.first?.nameValues == Set([
+            "Offline.efu",
+            "Archive.efu"
+        ]),
+    "exact filelistfilename: value lists should be pushed into SQLite source candidate hints"
 )
 
 let frnHint = SearchEngine.candidateHint(for: SearchRequest(query: "frn:12345"))
@@ -5594,8 +5630,19 @@ do {
         name: "Offline Media.efu",
         path: "/Users/me/File Lists/Offline Media.efu"
     )
+    let archiveFileListEntry = FileEntry(
+        path: "/Volumes/Archive/Old Catalog Movie.mkv",
+        name: "Old Catalog Movie.mkv",
+        parent: "/Volumes/Archive",
+        kind: .file,
+        byteSize: 101,
+        modifiedAt: Date(timeIntervalSince1970: 3_060)
+    ).markingFileListSource(
+        name: "Archive.efu",
+        path: "/Users/me/File Lists/Archive.efu"
+    )
 
-    try IndexStorage.upsert(entries: [sqliteFileListEntry], rootPath: temporaryDirectory.path, to: databaseURL)
+    try IndexStorage.upsert(entries: [sqliteFileListEntry, archiveFileListEntry], rootPath: temporaryDirectory.path, to: databaseURL)
     loadedSnapshot = try IndexStorage.load(from: databaseURL)
     let loadedFileListEntry = loadedSnapshot.entries.first { $0.path == sqliteFileListEntry.path }
     expect(
@@ -7193,14 +7240,44 @@ do {
         "SQLite candidate search should apply media text presence filters"
     )
 
-    let fileListSourceCandidates = try IndexStorage.candidateEntries(
+    let broadFileListSourceCandidates = try IndexStorage.candidateEntries(
         hint: SearchEngine.candidateHint(for: SearchRequest(query: "filelistfilename:Offline")),
         limit: 20,
         from: databaseURL
     )
     expect(
-        fileListSourceCandidates.map(\.path) == [sqliteFileListEntry.path],
-        "SQLite candidate search should apply file-list source provenance filters"
+        Set(broadFileListSourceCandidates.map(\.path)) == Set([sqliteFileListEntry.path, archiveFileListEntry.path]),
+        "SQLite candidate search should keep broad file-list source provenance filters when exact source matching is unsafe"
+    )
+
+    let exactFileListSourceCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(
+                query: "filelistfilename:\"Offline Media.efu\"",
+                options: exactParentChildOptions
+            )
+        ),
+        limit: 20,
+        from: databaseURL
+    )
+    expect(
+        exactFileListSourceCandidates.map(\.path) == [sqliteFileListEntry.path],
+        "SQLite candidate search should apply exact file-list source name filters"
+    )
+
+    let exactFileListSourcePathCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(
+                query: "filelistfilename:\"/Users/me/File Lists/Offline Media.efu\"",
+                options: exactParentChildOptions
+            )
+        ),
+        limit: 20,
+        from: databaseURL
+    )
+    expect(
+        exactFileListSourcePathCandidates.map(\.path) == [sqliteFileListEntry.path],
+        "SQLite candidate search should apply exact file-list source path filters"
     )
 
     let fileListSourcePresenceCandidates = try IndexStorage.candidateEntries(
@@ -7209,7 +7286,7 @@ do {
         from: databaseURL
     )
     expect(
-        fileListSourcePresenceCandidates.map(\.path) == [sqliteFileListEntry.path],
+        Set(fileListSourcePresenceCandidates.map(\.path)) == Set([sqliteFileListEntry.path, archiveFileListEntry.path]),
         "SQLite candidate search should apply file-list source presence filters"
     )
 
