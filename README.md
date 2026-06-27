@@ -86,6 +86,8 @@ The current packaged release is available from GitHub:
   to parent/path candidates, reducing slow path scans for common short terms.
 - Path-like or punctuated terms keep substring fallback enabled even when FTS
   fills the first candidate window, preserving exact path fragments.
+- Known `shell:` folder searches use SQLite folder-tree candidate filters instead
+  of broad path substring scans.
 - Statically impossible queries such as `nothing:` return before building the
   full in-memory search context.
 - Simple text, path, metadata, and attribute searches skip full relationship

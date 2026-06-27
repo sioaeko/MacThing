@@ -4079,8 +4079,17 @@ expect(
 let shellHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch shell:desktop"))
 expect(
     shellHint.canUseDatabaseCandidates &&
-        shellHint.terms.contains(selfTestDesktopPath),
-    "known shell: searches should add the resolved folder path to SQLite candidate terms"
+        shellHint.terms == ["launch"] &&
+        shellHint.folderTreePaths == [selfTestDesktopPath],
+    "known shell: searches should add resolved folder trees to SQLite candidate filters"
+)
+
+let shellOnlyHint = SearchEngine.candidateHint(for: SearchRequest(query: "shell:desktop"))
+expect(
+    shellOnlyHint.canUseDatabaseCandidates &&
+        shellOnlyHint.terms.isEmpty &&
+        shellOnlyHint.folderTreePaths == [selfTestDesktopPath],
+    "shell-only searches should use SQLite folder tree candidate filters"
 )
 
 let unknownShellHint = SearchEngine.candidateHint(for: SearchRequest(query: "shell:not-a-real-folder"))

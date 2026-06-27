@@ -686,6 +686,18 @@ private final class SQLiteDatabase {
             bindings.append(contentsOf: parentPaths.map { .text($0) })
         }
 
+        for folderPath in hint.folderTreePaths.sorted() where !folderPath.isEmpty {
+            clauses.append(
+                "(\(prefix)path = ? OR \(prefix)parent = ? OR \(prefix)parent LIKE ? ESCAPE '\\')"
+            )
+            bindings.append(.text(folderPath))
+            bindings.append(.text(folderPath))
+            let subtreePattern = folderPath == "/"
+                ? "/%"
+                : "\(escapeLike(folderPath))/%"
+            bindings.append(.text(subtreePattern))
+        }
+
         for filter in hint.pathListFilters where !filter.paths.isEmpty {
             let paths = filter.paths.sorted()
             clauses.append("\(prefix)path IN (\(placeholders(count: paths.count)))")

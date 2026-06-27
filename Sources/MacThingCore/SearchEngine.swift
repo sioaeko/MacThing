@@ -856,6 +856,7 @@ public struct SearchCandidateHint: Sendable {
     public let requiresEmptyEntry: Bool
     public let requiresNonEmptyEntry: Bool
     public let parentPaths: Set<String>
+    public let folderTreePaths: Set<String>
 
     public init(
         terms: [String],
@@ -892,7 +893,8 @@ public struct SearchCandidateHint: Sendable {
         rootOnly: Bool = false,
         requiresEmptyEntry: Bool = false,
         requiresNonEmptyEntry: Bool = false,
-        parentPaths: Set<String> = []
+        parentPaths: Set<String> = [],
+        folderTreePaths: Set<String> = []
     ) {
         self.terms = terms
         self.canUseDatabaseCandidates = canUseDatabaseCandidates
@@ -929,6 +931,7 @@ public struct SearchCandidateHint: Sendable {
         self.requiresEmptyEntry = requiresEmptyEntry
         self.requiresNonEmptyEntry = requiresNonEmptyEntry
         self.parentPaths = parentPaths
+        self.folderTreePaths = folderTreePaths
     }
 
     public var hasStructuredFilters: Bool {
@@ -964,7 +967,8 @@ public struct SearchCandidateHint: Sendable {
             rootOnly ||
             requiresEmptyEntry ||
             requiresNonEmptyEntry ||
-            !parentPaths.isEmpty
+            !parentPaths.isEmpty ||
+            !folderTreePaths.isEmpty
     }
 
     public func databaseCandidateLimit(requestedWindowEnd: Int) -> Int {
@@ -1192,6 +1196,7 @@ public enum SearchEngine {
         var requiresEmptyEntry = false
         var requiresNonEmptyEntry = false
         var parentPaths = Set<String>()
+        var folderTreePaths = Set<String>()
 
         func addTerm(_ value: String) {
             let restoredValue = unescapeQuotedListSeparators(value)
@@ -2225,7 +2230,7 @@ public enum SearchEngine {
                     guard let path = knownShellFolderPath(value) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
-                    addTerm(path)
+                    folderTreePaths.insert(normalizedFolderPath(path))
                 case "empty":
                     if isExplicitFalseBoolean(value) {
                         requiresNonEmptyEntry = true
@@ -2385,7 +2390,8 @@ public enum SearchEngine {
             rootOnly ||
             requiresEmptyEntry ||
             requiresNonEmptyEntry ||
-            !parentPaths.isEmpty
+            !parentPaths.isEmpty ||
+            !folderTreePaths.isEmpty
         return SearchCandidateHint(
             terms: uniqueTerms,
             canUseDatabaseCandidates: !uniqueTerms.isEmpty || hasStructuredFilters,
@@ -2421,7 +2427,8 @@ public enum SearchEngine {
             rootOnly: rootOnly,
             requiresEmptyEntry: requiresEmptyEntry,
             requiresNonEmptyEntry: requiresNonEmptyEntry,
-            parentPaths: parentPaths
+            parentPaths: parentPaths,
+            folderTreePaths: folderTreePaths
         )
     }
 
