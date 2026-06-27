@@ -722,6 +722,7 @@ public enum SearchCandidateNameMatchMode: Equatable, Sendable {
 public enum SearchCandidateNameField: Equatable, Sendable {
     case name
     case namePart
+    case pathPart
 }
 
 public struct SearchCandidateNameFilter: Sendable {
@@ -1810,10 +1811,12 @@ public enum SearchEngine {
                     addNameCandidateHint(value: value, mode: .contains)
                 case "path", "fullpath", "pathandname",
                      "pathname", "parsefullpath", "parsefilename", "parsepathandname",
-                     "parsepathname", "pathpart", "pathparts", "pp", "location":
+                     "parsepathname":
                     if !value.isEmpty {
                         terms.append(value)
                     }
+                case "pathpart", "pathparts", "pp", "location":
+                    addNameCandidateHint(value: value, field: .pathPart, mode: .contains)
                 case "stem", "namepart":
                     addNameCandidateHint(value: value, field: .namePart, mode: .contains)
                 case "parent", "infolder", "nosubfolders":

@@ -3277,6 +3277,18 @@ expect(
     "exact stem: filters should be pushed into SQLite name-part candidate hints"
 )
 
+let exactPathPartContainsHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "path-part:/Users/me/PathNeedle", options: exactParentChildOptions)
+)
+expect(
+    exactPathPartContainsHint.canUseDatabaseCandidates &&
+        exactPathPartContainsHint.terms.isEmpty &&
+        exactPathPartContainsHint.nameFilters.first?.field == .pathPart &&
+        exactPathPartContainsHint.nameFilters.first?.mode == .contains &&
+        exactPathPartContainsHint.nameFilters.first?.values == Set(["/Users/me/PathNeedle"]),
+    "exact path-part: filters should be pushed into SQLite path-part candidate hints"
+)
+
 let exactStartWithHint = SearchEngine.candidateHint(
     for: SearchRequest(query: "start-with:Launch", options: exactParentChildOptions)
 )
@@ -5813,6 +5825,24 @@ do {
         modifiedAt: Date(timeIntervalSince1970: 2_716),
         indexedAt: Date(timeIntervalSince1970: 2_716)
     )
+    let pathPartTarget = FileEntry(
+        path: "/Users/me/PathNeedle/Folder/PathPart Target.namefilter",
+        name: "PathPart Target.namefilter",
+        parent: "/Users/me/PathNeedle/Folder",
+        kind: .file,
+        byteSize: 263,
+        modifiedAt: Date(timeIntervalSince1970: 2_717),
+        indexedAt: Date(timeIntervalSince1970: 2_717)
+    )
+    let pathPartNameDecoy = FileEntry(
+        path: "/Users/me/NameFilters/PathNeedle Name Only.namefilter",
+        name: "PathNeedle Name Only.namefilter",
+        parent: "/Users/me/NameFilters",
+        kind: .file,
+        byteSize: 264,
+        modifiedAt: Date(timeIntervalSince1970: 2_718),
+        indexedAt: Date(timeIntervalSince1970: 2_718)
+    )
     try IndexStorage.upsert(
         entries: [
             namePrefixTarget,
@@ -5821,7 +5851,9 @@ do {
             nameSuffixDecoy,
             exactNameTarget,
             exactNameDecoy,
-            extensionOnlyNamePartDecoy
+            extensionOnlyNamePartDecoy,
+            pathPartTarget,
+            pathPartNameDecoy
         ],
         rootPath: temporaryDirectory.path,
         to: databaseURL
@@ -5861,6 +5893,18 @@ do {
     expect(
         Set(stemContainsCandidates.map(\.path)) == Set([namePrefixTarget.path, namePrefixDecoy.path]),
         "SQLite candidate search should apply exact stem/name-part filters"
+    )
+
+    let pathPartContainsCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "path-part:/Users/me/PathNeedle", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: databaseURL
+    )
+    expect(
+        pathPartContainsCandidates.map(\.path) == [pathPartTarget.path],
+        "SQLite candidate search should apply exact path-part filters"
     )
 
     let nameSuffixCandidates = try IndexStorage.candidateEntries(

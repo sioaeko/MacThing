@@ -97,8 +97,8 @@ The current packaged release is available from GitHub:
   `dm:unknown`, file attributes, media track/year metadata, filesystem identity
   (`frn:`) filters, root-entry (`root:`) filters, file-list provenance
   (`filelistfilename:`) filters, exact file-list source/value filters, exact
-  name/stem contains and name prefix/suffix/equality filters, exact existence
-  filters, exact path-list filters, empty-entry (`empty:`) filters,
+  name/stem/path-part contains and name prefix/suffix/equality filters, exact
+  existence filters, exact path-list filters, empty-entry (`empty:`) filters,
   known shell-folder path filters, exact direct-parent filters, direct-child count,
   child attr/date/run-count/size,
   ancestor attribute filters, ancestor-child presence/exact filters, child

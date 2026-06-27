@@ -1124,6 +1124,8 @@ private final class SQLiteDatabase {
             return "\(prefix)name"
         case .namePart:
             return "\(prefix)exact_name_part"
+        case .pathPart:
+            return "\(prefix)exact_path_part"
         }
     }
 
