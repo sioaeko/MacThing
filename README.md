@@ -88,6 +88,8 @@ The current packaged release is available from GitHub:
   fills the first candidate window, preserving exact path fragments.
 - Statically impossible queries such as `nothing:` return before building the
   full in-memory search context.
+- Simple text, path, metadata, and attribute searches skip full relationship
+  and duplicate indexes unless the parsed query needs them.
 - SQLite candidate seeding also applies supported structured filters such as
   extension, kind/category, file size including `size:unknown`, dates including
   `dm:unknown`, file attributes, media track/year metadata, filesystem identity

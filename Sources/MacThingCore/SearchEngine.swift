@@ -502,17 +502,20 @@ public struct SearchDiagnostics: Codable, Sendable {
     public let source: SearchSource
     public let durationMilliseconds: Double
     public let searchedEntryCount: Int
+    public let builtFullContext: Bool
     public let candidateCount: Int?
 
     public init(
         source: SearchSource,
         durationMilliseconds: Double,
         searchedEntryCount: Int,
+        builtFullContext: Bool = false,
         candidateCount: Int? = nil
     ) {
         self.source = source
         self.durationMilliseconds = durationMilliseconds
         self.searchedEntryCount = searchedEntryCount
+        self.builtFullContext = builtFullContext
         self.candidateCount = candidateCount
     }
 }
@@ -1040,11 +1043,13 @@ public enum SearchEngine {
         buildFullContext: Bool
     ) -> SearchResponse {
         let startedAt = Date()
+        var builtFullContext = false
         func diagnostics(searchedEntryCount: Int = entries.count) -> SearchDiagnostics {
             SearchDiagnostics(
                 source: .memory,
                 durationMilliseconds: Date().timeIntervalSince(startedAt) * 1_000,
-                searchedEntryCount: searchedEntryCount
+                searchedEntryCount: searchedEntryCount,
+                builtFullContext: builtFullContext
             )
         }
 
@@ -1089,7 +1094,13 @@ public enum SearchEngine {
             )
         }
 
-        let context = SearchContext(entries: entries, options: request.options, buildFullIndexes: buildFullContext)
+        let shouldBuildFullContext = buildFullContext && parsed.requiresFullContext
+        builtFullContext = shouldBuildFullContext
+        let context = SearchContext(
+            entries: entries,
+            options: request.options,
+            buildFullIndexes: shouldBuildFullContext
+        )
         var resultWindow = MatchWindow(
             request: effectiveRequest,
             field: effectiveRequest.sortField,
@@ -3489,6 +3500,10 @@ private struct ParsedSearch {
         expression?.isNever ?? false
     }
 
+    var requiresFullContext: Bool {
+        expression?.requiresFullContext ?? false
+    }
+
     func score(entry: FileEntry, options: SearchOptions, context: SearchContext) -> Int? {
         expression?.score(entry: entry, options: options, context: context)
     }
@@ -3537,6 +3552,17 @@ private indirect enum SearchExpression {
         }
     }
 
+    var requiresFullContext: Bool {
+        switch self {
+        case let .term(term):
+            return term.requiresFullContext
+        case let .and(expressions), let .or(expressions):
+            return expressions.contains(where: \.requiresFullContext)
+        case let .not(expression):
+            return expression.requiresFullContext
+        }
+    }
+
     func score(entry: FileEntry, options: SearchOptions, context: SearchContext) -> Int? {
         switch self {
         case let .term(term):
@@ -3570,6 +3596,10 @@ private struct SearchTerm {
 
     var isAlways: Bool {
         predicate.isAlways
+    }
+
+    var requiresFullContext: Bool {
+        predicate.requiresFullContext
     }
 
     func score(entry: FileEntry, options: SearchOptions, context: SearchContext) -> Int? {
@@ -3777,6 +3807,39 @@ private indirect enum SearchPredicate {
         case let .withOptions(_, predicate):
             return predicate.isAlways
         case .always:
+            return true
+        default:
+            return false
+        }
+    }
+
+    var requiresFullContext: Bool {
+        switch self {
+        case let .and(predicates):
+            return predicates.contains(where: \.requiresFullContext)
+        case let .withOptions(_, predicate):
+            return predicate.requiresFullContext
+        case .fileSystemIndex,
+             .exists,
+             .parentDateCreated, .parentDateModified, .parentSize,
+             .childCount, .childFileCount, .childFolderCount, .totalChildSize,
+             .childDateAccessed, .childDateCreated, .childDateModified,
+             .childRecentChange, .childDateRun, .childRunCount, .childSize,
+             .descendantCount,
+             .siblingCount, .siblingFileCount, .siblingFolderCount,
+             .child, .childAttributes, .childFileList,
+             .descendant, .ancestorAttributes, .ancestorChild,
+             .parentChild, .sibling, .parentSibling, .ancestorSibling,
+             .empty, .notEmpty,
+             .duplicateName, .uniqueName, .nameFrequency,
+             .duplicateNamePart, .uniqueNamePart, .extensionFrequency,
+             .duplicatePathPart, .uniquePathPart,
+             .duplicateSize, .uniqueSize,
+             .duplicateCreatedDate, .uniqueCreatedDate,
+             .duplicateModifiedDate, .uniqueModifiedDate,
+             .duplicateAccessedDate, .uniqueAccessedDate,
+             .duplicateAttributes, .uniqueAttributes,
+             .formula:
             return true
         default:
             return false

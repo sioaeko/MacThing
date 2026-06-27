@@ -771,8 +771,18 @@ expect(
 )
 expect(
     boundedRecentResults.diagnostics?.source == .memory &&
-        boundedRecentResults.diagnostics?.searchedEntryCount == manyRecentEntries.count,
+        boundedRecentResults.diagnostics?.searchedEntryCount == manyRecentEntries.count &&
+        boundedRecentResults.diagnostics?.builtFullContext == false,
     "search responses should report memory search diagnostics"
+)
+
+let simpleTextDiagnostics = SearchEngine.search(
+    request: SearchRequest(query: "item-1999", limit: 5),
+    in: manyRecentEntries
+)
+expect(
+    simpleTextDiagnostics.diagnostics?.builtFullContext == false,
+    "simple text searches should skip full search context"
 )
 
 let compactMatch = FileEntry(
@@ -1572,7 +1582,8 @@ let nothingResponse = SearchEngine.search(
 expect(
     nothingResponse.entries.isEmpty &&
         nothingResponse.totalMatches == 0 &&
-        nothingResponse.diagnostics?.searchedEntryCount == 0,
+        nothingResponse.diagnostics?.searchedEntryCount == 0 &&
+        nothingResponse.diagnostics?.builtFullContext == false,
     "statically impossible searches should return before scanning entries"
 )
 
@@ -1780,6 +1791,15 @@ expect(
 expect(
     Set(SearchEngine.search(query: "dupe:", in: syntaxEntries).map(\.path)) == Set([duplicateA.path, duplicateB.path]),
     "dupe: should match entries with duplicate names"
+)
+
+let duplicateDiagnostics = SearchEngine.search(
+    request: SearchRequest(query: "dupe:", limit: 20),
+    in: syntaxEntries
+)
+expect(
+    duplicateDiagnostics.diagnostics?.builtFullContext == true,
+    "duplicate searches should still build full search context"
 )
 
 expect(
