@@ -96,7 +96,7 @@ The current packaged release is available from GitHub:
   extension, semicolon extension/category lists, kind/category, file size including `size:unknown`, dates including
   `dm:unknown`, file attributes, media track/year metadata, filesystem identity
   (`frn:`) filters, root-entry (`root:`) filters, file-list provenance
-  (`filelistfilename:`) filters, exact file-list source/value filters, exact
+  (`filelistfilename:`) filters, exact file-list source/value-list filters, exact
   name/stem/path-part contains and name prefix/suffix/equality filters, exact
   existence filters, exact path-list and path-list value-list filters, empty-entry (`empty:`) filters,
   known shell-folder path filters, exact direct-parent/value-list filters, direct-child count,

@@ -3972,6 +3972,20 @@ expect(
     "exact filelist: path searches should be pushed into SQLite candidate hints"
 )
 
+let exactFileListValueListHint = SearchEngine.candidateHint(
+    for: SearchRequest(
+        query: "filelist:readme.txt;/Users/me/project/archive/deep/readme.txt",
+        options: exactParentChildOptions
+    )
+)
+expect(
+    exactFileListValueListHint.canUseDatabaseCandidates &&
+        exactFileListValueListHint.fileListFilters.first?.nameValues == Set(["readme.txt"]) &&
+        exactFileListValueListHint.fileListFilters.first?.pathValues ==
+            Set(["/Users/me/project/archive/deep/readme.txt"]),
+    "exact filelist: value lists should be pushed into SQLite candidate hints"
+)
+
 let wildcardFileListHint = SearchEngine.candidateHint(
     for: SearchRequest(query: "filelist:readme.*", options: exactParentChildOptions)
 )
@@ -6409,6 +6423,21 @@ do {
     expect(
         exactFileListPathCandidates.map(\.path) == [pathMatch.path],
         "SQLite candidate search should apply exact filelist path filters"
+    )
+
+    let exactFileListValueListCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(
+                query: "filelist:Launch.JPG;/Users/me/project/archive/deep/readme.txt",
+                options: exactParentChildOptions
+            )
+        ),
+        limit: 20,
+        from: pathListCandidateDatabaseURL
+    )
+    expect(
+        Set(exactFileListValueListCandidates.map(\.path)) == Set([photo.path, deepPathMatch.path]),
+        "SQLite candidate search should apply exact filelist value-list filters"
     )
 
     let siblingRelationCandidateDatabaseURL = temporaryDirectory.appending(path: "SiblingRelationCandidates.db")

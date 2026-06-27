@@ -1855,7 +1855,8 @@ public enum SearchEngine {
                     switch function {
                     case "ext", "extension", "type", "kind", "category",
                          "pathlist", "fullpathlist",
-                         "parent", "infolder", "nosubfolders":
+                         "parent", "infolder", "nosubfolders",
+                         "filelist":
                         break
                     default:
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
