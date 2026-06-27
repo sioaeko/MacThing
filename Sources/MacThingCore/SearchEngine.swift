@@ -1271,6 +1271,42 @@ public enum SearchEngine {
             }
         }
 
+        func semicolonDelimitedValues(from rawValue: String) -> [String]? {
+            let values = rawValue
+                .split(separator: ";", omittingEmptySubsequences: false)
+                .map {
+                    unescapeQuotedListSeparators(
+                        String($0).trimmingCharacters(in: .whitespacesAndNewlines)
+                    )
+                }
+            guard values.count > 1,
+                  values.allSatisfy({ !$0.isEmpty }) else {
+                return nil
+            }
+            return values
+        }
+
+        func addCategoryCandidateHint(rawValue: String, value: String) -> Bool {
+            let values: [String]
+            if rawValue.contains(";") {
+                guard let parsedValues = semicolonDelimitedValues(from: rawValue) else {
+                    return false
+                }
+                values = parsedValues
+            } else {
+                values = [value]
+            }
+
+            for rawCategory in values {
+                guard let category = FileCategory.parse(rawCategory) else {
+                    return false
+                }
+                extensions.formUnion(category.candidateExtensions)
+                kinds.formUnion(category.candidateKinds)
+            }
+            return true
+        }
+
         func isCountDirective(_ rawToken: String) -> Bool {
             guard let colonIndex = rawToken.firstIndex(of: ":") else {
                 return false
@@ -1796,7 +1832,7 @@ public enum SearchEngine {
                    supportsSemicolonSearchFunctionValueList(function: function),
                    !supportsFileListSourcePresence {
                     switch function {
-                    case "ext", "extension":
+                    case "ext", "extension", "type", "kind", "category":
                         break
                     default:
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
@@ -2148,11 +2184,9 @@ public enum SearchEngine {
                 case "endwith", "endswith", "end":
                     addNameCandidateHint(value: value, mode: .suffix)
                 case "type", "kind", "category":
-                    guard let category = FileCategory.parse(value) else {
+                    guard addCategoryCandidateHint(rawValue: rawValue, value: value) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
-                    extensions.formUnion(category.candidateExtensions)
-                    kinds.formUnion(category.candidateKinds)
                 case "image", "images", "pic", "pics", "picture", "pictures", "photo", "photos":
                     guard value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)

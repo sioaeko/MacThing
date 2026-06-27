@@ -2812,6 +2812,16 @@ expect(
     "type filters should be pushed into SQLite candidate hints"
 )
 
+let categoryListHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch type:image;audio"))
+expect(
+    categoryListHint.canUseDatabaseCandidates &&
+        categoryListHint.terms == ["launch"] &&
+        categoryListHint.kinds == [.file] &&
+        categoryListHint.extensions.contains("jpg") &&
+        categoryListHint.extensions.contains("m4a"),
+    "semicolon category lists should be pushed into SQLite candidate hints"
+)
+
 let compressedHint = SearchEngine.candidateHint(for: SearchRequest(query: "backup zip:"))
 expect(
     compressedHint.canUseDatabaseCandidates &&
@@ -6016,6 +6026,16 @@ do {
     expect(
         documentCandidates.map(\.path) == [document.path],
         "SQLite candidate search should apply type/category filters"
+    )
+
+    let categoryListCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "launch type:image;document")),
+        limit: 20,
+        from: databaseURL
+    )
+    expect(
+        Set(categoryListCandidates.map(\.path)) == Set([photo.path, document.path]),
+        "SQLite candidate search should apply semicolon category-list filters"
     )
 
     try IndexStorage.upsert(
