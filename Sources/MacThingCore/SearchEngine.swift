@@ -719,11 +719,18 @@ public enum SearchCandidateNameMatchMode: Equatable, Sendable {
     case suffix
 }
 
+public enum SearchCandidateNameField: Equatable, Sendable {
+    case name
+    case namePart
+}
+
 public struct SearchCandidateNameFilter: Sendable {
+    public let field: SearchCandidateNameField
     public let mode: SearchCandidateNameMatchMode
     public let values: Set<String>
 
-    public init(mode: SearchCandidateNameMatchMode, values: Set<String>) {
+    public init(field: SearchCandidateNameField = .name, mode: SearchCandidateNameMatchMode, values: Set<String>) {
+        self.field = field
         self.mode = mode
         self.values = values
     }
@@ -1248,12 +1255,16 @@ public enum SearchEngine {
                 !request.options.wholeWordMatching
         }
 
-        func addNameCandidateHint(value: String, mode: SearchCandidateNameMatchMode) {
+        func addNameCandidateHint(
+            value: String,
+            field: SearchCandidateNameField = .name,
+            mode: SearchCandidateNameMatchMode
+        ) {
             guard !value.isEmpty else {
                 return
             }
             if canUseExactTextCandidateFilters() {
-                nameFilters.append(SearchCandidateNameFilter(mode: mode, values: [value]))
+                nameFilters.append(SearchCandidateNameFilter(field: field, mode: mode, values: [value]))
             } else {
                 addTerm(value)
             }
@@ -1799,11 +1810,12 @@ public enum SearchEngine {
                     addNameCandidateHint(value: value, mode: .contains)
                 case "path", "fullpath", "pathandname",
                      "pathname", "parsefullpath", "parsefilename", "parsepathandname",
-                     "parsepathname", "pathpart", "pathparts", "pp", "location",
-                     "stem", "namepart":
+                     "parsepathname", "pathpart", "pathparts", "pp", "location":
                     if !value.isEmpty {
                         terms.append(value)
                     }
+                case "stem", "namepart":
+                    addNameCandidateHint(value: value, field: .namePart, mode: .contains)
                 case "parent", "infolder", "nosubfolders":
                     let normalizedParent = normalizedFolderPath(value)
                     if isAbsoluteSearchPath(normalizedParent) {

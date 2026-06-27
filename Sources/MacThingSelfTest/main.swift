@@ -3259,9 +3259,22 @@ let exactNameContainsHint = SearchEngine.candidateHint(
 expect(
     exactNameContainsHint.canUseDatabaseCandidates &&
         exactNameContainsHint.terms.isEmpty &&
+        exactNameContainsHint.nameFilters.first?.field == .name &&
         exactNameContainsHint.nameFilters.first?.mode == .contains &&
         exactNameContainsHint.nameFilters.first?.values == Set(["NeedlePrefix"]),
     "exact name: filters should be pushed into SQLite name-contains candidate hints"
+)
+
+let exactStemContainsHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "stem:NeedlePrefix", options: exactParentChildOptions)
+)
+expect(
+    exactStemContainsHint.canUseDatabaseCandidates &&
+        exactStemContainsHint.terms.isEmpty &&
+        exactStemContainsHint.nameFilters.first?.field == .namePart &&
+        exactStemContainsHint.nameFilters.first?.mode == .contains &&
+        exactStemContainsHint.nameFilters.first?.values == Set(["NeedlePrefix"]),
+    "exact stem: filters should be pushed into SQLite name-part candidate hints"
 )
 
 let exactStartWithHint = SearchEngine.candidateHint(
@@ -5791,6 +5804,15 @@ do {
         modifiedAt: Date(timeIntervalSince1970: 2_715),
         indexedAt: Date(timeIntervalSince1970: 2_715)
     )
+    let extensionOnlyNamePartDecoy = FileEntry(
+        path: "/Users/me/NameFilters/Other.needleprefix",
+        name: "Other.needleprefix",
+        parent: "/Users/me/NameFilters",
+        kind: .file,
+        byteSize: 262,
+        modifiedAt: Date(timeIntervalSince1970: 2_716),
+        indexedAt: Date(timeIntervalSince1970: 2_716)
+    )
     try IndexStorage.upsert(
         entries: [
             namePrefixTarget,
@@ -5798,7 +5820,8 @@ do {
             nameSuffixTarget,
             nameSuffixDecoy,
             exactNameTarget,
-            exactNameDecoy
+            exactNameDecoy,
+            extensionOnlyNamePartDecoy
         ],
         rootPath: temporaryDirectory.path,
         to: databaseURL
@@ -5826,6 +5849,18 @@ do {
     expect(
         Set(nameContainsCandidates.map(\.path)) == Set([namePrefixTarget.path, namePrefixDecoy.path]),
         "SQLite candidate search should apply exact name-contains filters"
+    )
+
+    let stemContainsCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "stem:NeedlePrefix", options: exactParentChildOptions)
+        ),
+        limit: 20,
+        from: databaseURL
+    )
+    expect(
+        Set(stemContainsCandidates.map(\.path)) == Set([namePrefixTarget.path, namePrefixDecoy.path]),
+        "SQLite candidate search should apply exact stem/name-part filters"
     )
 
     let nameSuffixCandidates = try IndexStorage.candidateEntries(

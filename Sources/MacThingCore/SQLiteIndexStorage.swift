@@ -1089,31 +1089,41 @@ private final class SQLiteDatabase {
         guard !values.isEmpty else {
             return ("1 = 1", [])
         }
+        let column = nameFilterColumn(prefix: prefix, field: filter.field)
 
         switch filter.mode {
         case .contains:
-            let clauses = Array(repeating: "instr(\(prefix)name, ?) > 0", count: values.count)
+            let clauses = Array(repeating: "instr(\(column), ?) > 0", count: values.count)
             return (
                 "(\(clauses.joined(separator: " OR ")))",
                 values.map(SQLiteValue.text)
             )
         case .equal:
             return (
-                "\(prefix)name IN (\(placeholders(count: values.count)))",
+                "\(column) IN (\(placeholders(count: values.count)))",
                 values.map(SQLiteValue.text)
             )
         case .prefix:
-            let clauses = Array(repeating: "\(prefix)name LIKE ? ESCAPE '\\'", count: values.count)
+            let clauses = Array(repeating: "\(column) LIKE ? ESCAPE '\\'", count: values.count)
             return (
                 "(\(clauses.joined(separator: " OR ")))",
                 values.map { .text("\(escapeLike($0))%") }
             )
         case .suffix:
-            let clauses = Array(repeating: "\(prefix)name LIKE ? ESCAPE '\\'", count: values.count)
+            let clauses = Array(repeating: "\(column) LIKE ? ESCAPE '\\'", count: values.count)
             return (
                 "(\(clauses.joined(separator: " OR ")))",
                 values.map { .text("%\(escapeLike($0))") }
             )
+        }
+    }
+
+    private func nameFilterColumn(prefix: String, field: SearchCandidateNameField) -> String {
+        switch field {
+        case .name:
+            return "\(prefix)name"
+        case .namePart:
+            return "\(prefix)exact_name_part"
         }
     }
 
