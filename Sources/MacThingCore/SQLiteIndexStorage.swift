@@ -926,7 +926,23 @@ private final class SQLiteDatabase {
         }
 
         if let filter = hint.fileReferenceFilter {
-            if let fileID = filter.fileID, !fileID.isEmpty {
+            if !filter.values.isEmpty {
+                var referenceClauses: [String] = []
+                let values = filter.values.sorted {
+                    ($0.volumeID ?? "", $0.fileID) < ($1.volumeID ?? "", $1.fileID)
+                }
+                for value in values {
+                    if let volumeID = value.volumeID, !volumeID.isEmpty {
+                        referenceClauses.append("(LOWER(\(prefix)file_id) = ? AND LOWER(\(prefix)volume_id) = ?)")
+                        bindings.append(.text(value.fileID.lowercased()))
+                        bindings.append(.text(volumeID.lowercased()))
+                    } else {
+                        referenceClauses.append("LOWER(\(prefix)file_id) = ?")
+                        bindings.append(.text(value.fileID.lowercased()))
+                    }
+                }
+                clauses.append("(\(referenceClauses.joined(separator: " OR ")))")
+            } else if let fileID = filter.fileID, !fileID.isEmpty {
                 clauses.append("LOWER(\(prefix)file_id) = ?")
                 bindings.append(.text(fileID.lowercased()))
                 if let volumeID = filter.volumeID, !volumeID.isEmpty {

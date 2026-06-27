@@ -614,13 +614,40 @@ public struct SearchCandidateMediaTextFilter: Sendable {
     }
 }
 
+public struct SearchCandidateFileReferenceValue: Hashable, Sendable {
+    public let fileID: String
+    public let volumeID: String?
+
+    public init(fileID: String, volumeID: String? = nil) {
+        self.fileID = fileID
+        self.volumeID = volumeID
+    }
+}
+
 public struct SearchCandidateFileReferenceFilter: Sendable {
     public let fileID: String?
     public let volumeID: String?
+    public let values: Set<SearchCandidateFileReferenceValue>
 
     public init(fileID: String?, volumeID: String? = nil) {
         self.fileID = fileID
         self.volumeID = volumeID
+        if let fileID, !fileID.isEmpty {
+            values = [SearchCandidateFileReferenceValue(fileID: fileID, volumeID: volumeID)]
+        } else {
+            values = []
+        }
+    }
+
+    public init(values: Set<SearchCandidateFileReferenceValue>) {
+        self.values = values
+        if values.count == 1, let value = values.first {
+            fileID = value.fileID
+            volumeID = value.volumeID
+        } else {
+            fileID = nil
+            volumeID = nil
+        }
     }
 }
 
@@ -1462,17 +1489,32 @@ public enum SearchEngine {
                 .replacingOccurrences(of: " ", with: "")
         }
 
-        func makeFileReferenceFilter(for value: String) -> SearchCandidateFileReferenceFilter {
+        func makeFileReferenceValue(for value: String) -> SearchCandidateFileReferenceValue? {
             let normalizedValue = normalizedFileReferenceValue(value)
             guard !normalizedValue.isEmpty else {
-                return SearchCandidateFileReferenceFilter(fileID: nil)
+                return nil
             }
             guard let colonIndex = normalizedValue.firstIndex(of: ":") else {
-                return SearchCandidateFileReferenceFilter(fileID: normalizedValue)
+                return SearchCandidateFileReferenceValue(fileID: normalizedValue)
             }
             let volumeID = String(normalizedValue[..<colonIndex])
             let fileID = String(normalizedValue[normalizedValue.index(after: colonIndex)...])
-            return SearchCandidateFileReferenceFilter(fileID: fileID, volumeID: volumeID)
+            guard !fileID.isEmpty else {
+                return nil
+            }
+            return SearchCandidateFileReferenceValue(fileID: fileID, volumeID: volumeID.isEmpty ? nil : volumeID)
+        }
+
+        func makeFileReferenceFilter(for rawValue: String) -> SearchCandidateFileReferenceFilter {
+            let values = parseDelimitedList(rawValue)
+            guard !values.isEmpty else {
+                return SearchCandidateFileReferenceFilter(fileID: nil)
+            }
+            let references = Set(values.compactMap(makeFileReferenceValue(for:)))
+            guard !references.isEmpty else {
+                return SearchCandidateFileReferenceFilter(fileID: nil)
+            }
+            return SearchCandidateFileReferenceFilter(values: references)
         }
 
         func isExplicitFalseBoolean(_ value: String) -> Bool {
@@ -1856,7 +1898,7 @@ public enum SearchEngine {
                     case "ext", "extension", "type", "kind", "category",
                          "pathlist", "fullpathlist",
                          "parent", "infolder", "nosubfolders",
-                         "filelist":
+                         "filelist", "frn":
                         break
                     default:
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)

@@ -94,7 +94,7 @@ The current packaged release is available from GitHub:
   and duplicate indexes unless the parsed query needs them.
 - SQLite candidate seeding also applies supported structured filters such as
   extension, semicolon extension/category lists, kind/category, file size including `size:unknown`, dates including
-  `dm:unknown`, file attributes, media track/year metadata, filesystem identity
+  `dm:unknown`, file attributes, media track/year metadata, filesystem identity/value-list
   (`frn:`) filters, root-entry (`root:`) filters, file-list provenance
   (`filelistfilename:`) filters, exact file-list source/value-list filters, exact
   name/stem/path-part contains and name prefix/suffix/equality filters, exact

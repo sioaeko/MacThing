@@ -4072,8 +4072,22 @@ expect(
 
 let listedFRNHint = SearchEngine.candidateHint(for: SearchRequest(query: "frn:12345;999"))
 expect(
-    listedFRNHint.canUseDatabaseCandidates == false,
-    "semicolon frn: searches should avoid lossy SQLite candidate prefiltering"
+    listedFRNHint.canUseDatabaseCandidates &&
+        listedFRNHint.fileReferenceFilter?.values == Set([
+            SearchCandidateFileReferenceValue(fileID: "12345"),
+            SearchCandidateFileReferenceValue(fileID: "999")
+        ]),
+    "semicolon frn: searches should be pushed into SQLite candidate hints"
+)
+
+let mixedListedFRNHint = SearchEngine.candidateHint(for: SearchRequest(query: "frn:12345;678:999"))
+expect(
+    mixedListedFRNHint.canUseDatabaseCandidates &&
+        mixedListedFRNHint.fileReferenceFilter?.values == Set([
+            SearchCandidateFileReferenceValue(fileID: "12345"),
+            SearchCandidateFileReferenceValue(fileID: "999", volumeID: "678")
+        ]),
+    "mixed volume-qualified frn: lists should be pushed into SQLite candidate hints"
 )
 
 let fsiHint = SearchEngine.candidateHint(for: SearchRequest(query: "fsi:0"))
@@ -6240,6 +6254,26 @@ do {
     expect(
         qualifiedFRNCandidates.map(\.path) == [identitySearchEntry.path],
         "SQLite candidate search should apply volume-qualified file reference filters"
+    )
+
+    let listedFRNCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "frn:12345;999")),
+        limit: 20,
+        from: identityCandidateDatabaseURL
+    )
+    expect(
+        Set(listedFRNCandidates.map(\.path)) == Set([identitySearchEntry.path, otherIdentitySearchEntry.path]),
+        "SQLite candidate search should apply file reference number value-list filters"
+    )
+
+    let mixedListedFRNCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "frn:12345;678:999")),
+        limit: 20,
+        from: identityCandidateDatabaseURL
+    )
+    expect(
+        Set(mixedListedFRNCandidates.map(\.path)) == Set([identitySearchEntry.path, otherIdentitySearchEntry.path]),
+        "SQLite candidate search should apply mixed volume-qualified file reference value-list filters"
     )
 
     let identityPresenceCandidates = try IndexStorage.candidateEntries(
