@@ -328,6 +328,7 @@ final class SearchStore: ObservableObject {
     @Published var totalMatches = 0
     @Published var searchWarnings: [String] = []
     @Published var selectedPath: String?
+    @Published var selectedPaths: Set<String> = []
     @Published var isIndexing = false
     @Published var isLoadingIndex = false
     @Published var isSearching = false
@@ -360,6 +361,7 @@ final class SearchStore: ObservableObject {
     private var historyTask: Task<Void, Never>?
     private var indexTask: Task<Void, Never>?
     private var loadIndexTask: Task<Void, Never>?
+    private var saveSettingsTask: Task<Void, Never>?
     private var monitorReindexTasksByProfileID: [String: Task<Void, Never>] = [:]
     private var fileSystemMonitorsByProfileID: [String: FileSystemMonitor] = [:]
     private var queryHTTPServer: QueryHTTPServer?
@@ -368,6 +370,23 @@ final class SearchStore: ObservableObject {
     private let queryServiceState = QueryServiceState()
     private var fileIndex = FileIndex()
     private var storedIndexedCount = 0
+    private var cachedFileListEntries: [FileEntry]?
+
+    private var cachedActiveFileListEntries: [FileEntry] {
+        if let cachedFileListEntries {
+            return cachedFileListEntries
+        }
+        let entries = fileListSources
+            .filter(\.isEnabled)
+            .flatMap(\.entriesWithSourceMetadata)
+        cachedFileListEntries = entries
+        return entries
+    }
+
+    private func invalidateFileListCache() {
+        cachedFileListEntries = nil
+    }
+
     private var pendingVolumeConfirmationPath: String?
     private var auxiliaryProfileEntriesByID: [String: [FileEntry]] = [:]
     private var pendingFileSystemChangesByProfileID: [String: [String: FileSystemChange]] = [:]
@@ -381,7 +400,17 @@ final class SearchStore: ObservableObject {
         guard let selectedPath else {
             return nil
         }
+        if let idx = selectedIndex, idx < results.count, results[idx].path == selectedPath {
+            return results[idx]
+        }
         return results.first { $0.path == selectedPath }
+    }
+
+    private var selectedIndex: Int? {
+        guard let selectedPath else {
+            return nil
+        }
+        return results.firstIndex { $0.path == selectedPath }
     }
 
     var orderedVisibleColumns: [ResultColumn] {
@@ -519,7 +548,7 @@ final class SearchStore: ObservableObject {
 
     func setQuery(_ value: String) {
         query = value
-        saveSettings()
+        scheduleSaveSettings()
         updateQueryServiceState()
         scheduleSearch()
         scheduleHistoryRecording(for: value)
@@ -830,6 +859,14 @@ final class SearchStore: ObservableObject {
     }
 
     func openSelected() {
+        if selectedPaths.count > 1 {
+            let entries = results.filter { selectedPaths.contains($0.path) }
+            for entry in entries {
+                recordRun(for: entry)
+                NSWorkspace.shared.open(URL(fileURLWithPath: entry.path))
+            }
+            return
+        }
         guard let selectedEntry else {
             return
         }
@@ -851,15 +888,41 @@ final class SearchStore: ObservableObject {
         }
 
         let currentIndex: Int
-        if let selectedPath,
-           let index = results.firstIndex(where: { $0.path == selectedPath }) {
-            currentIndex = index
+        if let idx = selectedIndex {
+            currentIndex = idx
         } else {
             currentIndex = offset >= 0 ? -1 : results.count
         }
 
         let nextIndex = min(max(currentIndex + offset, 0), results.count - 1)
         selectedPath = results[nextIndex].path
+        selectedPaths = [results[nextIndex].path]
+    }
+
+    func selectEntry(_ entry: FileEntry, commandDown: Bool, shiftDown: Bool) {
+        if commandDown {
+            // Cmd+Click: toggle individual item in multi-select
+            if selectedPaths.contains(entry.path) {
+                selectedPaths.remove(entry.path)
+                selectedPath = selectedPaths.first
+            } else {
+                selectedPaths.insert(entry.path)
+                selectedPath = entry.path
+            }
+        } else if shiftDown {
+            // Shift+Click: range select from anchor to clicked item
+            let anchorIndex = selectedIndex ?? 0
+            guard let targetIndex = results.firstIndex(where: { $0.path == entry.path }) else {
+                return
+            }
+            let range = min(anchorIndex, targetIndex)...max(anchorIndex, targetIndex)
+            selectedPaths = Set(results[range].map(\.path))
+            selectedPath = entry.path
+        } else {
+            // Plain click: single select
+            selectedPath = entry.path
+            selectedPaths = [entry.path]
+        }
     }
 
     func showCompactSearch() {
@@ -1048,6 +1111,14 @@ final class SearchStore: ObservableObject {
     }
 
     func revealSelected() {
+        if selectedPaths.count > 1 {
+            let urls = results
+                .filter { selectedPaths.contains($0.path) }
+                .map { URL(fileURLWithPath: $0.path) }
+            guard !urls.isEmpty else { return }
+            NSWorkspace.shared.activateFileViewerSelecting(urls)
+            return
+        }
         guard let selectedEntry else {
             return
         }
@@ -1055,13 +1126,19 @@ final class SearchStore: ObservableObject {
     }
 
     func copySelectedPath() {
-        guard let selectedEntry else {
+        let paths: [String]
+        if selectedPaths.count > 1 {
+            paths = results
+                .filter { selectedPaths.contains($0.path) }
+                .map(\.path)
+        } else if let selectedEntry {
+            paths = [selectedEntry.path]
+        } else {
             return
         }
-
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(selectedEntry.path, forType: .string)
+        pasteboard.setString(paths.joined(separator: "\n"), forType: .string)
         statusText = "Copied path"
     }
 
@@ -1112,6 +1189,7 @@ final class SearchStore: ObservableObject {
             )
             fileListSources.removeAll { $0.originalPath == source.originalPath }
             fileListSources.insert(source, at: 0)
+            invalidateFileListCache()
             saveFileListSources()
             rebuildEntriesFromIndexes()
             lastIndexedAt = Date()
@@ -1130,6 +1208,7 @@ final class SearchStore: ObservableObject {
 
         fileListSources[index].isEnabled.toggle()
         fileListSources[index].updatedAt = Date()
+        invalidateFileListCache()
         saveFileListSources()
         rebuildEntriesFromIndexes()
         updateQueryServiceState()
@@ -1156,6 +1235,7 @@ final class SearchStore: ObservableObject {
                 $0.markingFileListSource(name: sourceName, path: sourcePath)
             }
             fileListSources[index].updatedAt = Date()
+            invalidateFileListCache()
             saveFileListSources()
             rebuildEntriesFromIndexes()
             updateQueryServiceState()
@@ -1168,6 +1248,7 @@ final class SearchStore: ObservableObject {
 
     func removeFileListSource(_ source: FileListSource) {
         fileListSources.removeAll { $0.id == source.id }
+        invalidateFileListCache()
         saveFileListSources()
         rebuildEntriesFromIndexes()
         updateQueryServiceState()
@@ -1504,6 +1585,15 @@ final class SearchStore: ObservableObject {
         fileListSources = sources
     }
 
+    private func scheduleSaveSettings() {
+        saveSettingsTask?.cancel()
+        saveSettingsTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            self?.saveSettings()
+        }
+    }
+
     private func saveSettings() {
         let settings = PersistedSearchSettings(
             rootPath: rootPath,
@@ -1620,7 +1710,10 @@ final class SearchStore: ObservableObject {
     }
 
     private func rebuildEntriesFromIndexes() {
-        var combinedByPath: [String: FileEntry] = [:]
+        let estimatedCount = fileIndex.snapshotByPath.count
+            + auxiliaryProfileEntriesByID.values.reduce(0, { $0 + $1.count })
+            + fileListSources.filter(\.isEnabled).reduce(0, { $0 + $1.entries.count })
+        var combinedByPath: [String: FileEntry] = Dictionary(minimumCapacity: estimatedCount)
 
         for source in fileListSources where source.isEnabled {
             for entry in source.entriesWithSourceMetadata {
@@ -2096,14 +2189,24 @@ final class SearchStore: ObservableObject {
                 return lhs.count < rhs.count
             }
 
+        var coalescedSet: Set<String> = []
         var coalescedPaths: [String] = []
         for path in sortedPaths {
-            guard !coalescedPaths.contains(where: { existingPath in
-                path.hasPrefix(existingPath + "/")
-            }) else {
-                continue
+            // Check if any ancestor is already coalesced by walking up "/" boundaries
+            var isChild = false
+            var searchEnd = path.startIndex
+            while let slashIndex = path[path.index(after: searchEnd)...].firstIndex(of: "/") {
+                let prefix = String(path[..<slashIndex])
+                if coalescedSet.contains(prefix) {
+                    isChild = true
+                    break
+                }
+                searchEnd = slashIndex
             }
-            coalescedPaths.append(path)
+            if !isChild {
+                coalescedSet.insert(path)
+                coalescedPaths.append(path)
+            }
         }
         return coalescedPaths
     }
@@ -2208,6 +2311,7 @@ final class SearchStore: ObservableObject {
             }
             fileListSources[sourceIndex].entries[entryIndex] = updatedEntry
             fileListSources[sourceIndex].updatedAt = Date()
+            invalidateFileListCache()
             return true
         }
         return false
@@ -2234,9 +2338,7 @@ final class SearchStore: ObservableObject {
         let searchOptions = searchOptions
         let indexURLs = enabledProfileIndexURLs
         let indexedCount = max(entries.count, storedIndexedCount)
-        let activeFileListEntries = fileListSources
-            .filter(\.isEnabled)
-            .flatMap(\.entriesWithSourceMetadata)
+        let activeFileListEntries = cachedActiveFileListEntries
         searchTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled else {

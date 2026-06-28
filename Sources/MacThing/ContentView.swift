@@ -3,10 +3,11 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var store: SearchStore
+    @FocusState private var isSearchFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
-            TopBar()
+            TopBar(isSearchFocused: $isSearchFocused)
             Divider()
             ResultHeader()
             Divider()
@@ -15,11 +16,24 @@ struct ContentView: View {
             StatusBar()
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear {
+            DispatchQueue.main.async {
+                isSearchFocused = true
+            }
+        }
+        .onKeyPress(keys: [KeyEquivalent("l")], phases: .down) { press in
+            if press.modifiers.contains(.command) {
+                isSearchFocused = true
+                return .handled
+            }
+            return .ignored
+        }
     }
 }
 
 private struct TopBar: View {
     @EnvironmentObject private var store: SearchStore
+    var isSearchFocused: FocusState<Bool>.Binding
 
     var body: some View {
         VStack(spacing: 10) {
@@ -29,13 +43,14 @@ private struct TopBar: View {
                         get: { store.query },
                         set: { store.setQuery($0) }
                     ),
+                    isFocused: isSearchFocused,
                     onSubmit: {
                         if !store.runSearchCommandIfNeeded() {
                             store.openSelectedOrFirst()
                         }
                     }
                 )
-                .frame(minWidth: 420, maxWidth: .infinity)
+                .frame(minWidth: 280, maxWidth: .infinity)
                 .layoutPriority(2)
 
                 ToolbarCluster {
@@ -65,10 +80,10 @@ private struct TopBar: View {
 
             HStack(spacing: 12) {
                 FilterPicker()
-                    .frame(minWidth: 520, idealWidth: 580, maxWidth: 660)
+                    .frame(minWidth: 320, idealWidth: 480, maxWidth: 600)
                     .layoutPriority(1)
 
-                Spacer(minLength: 20)
+                Spacer(minLength: 8)
 
                 ToolbarCluster {
                     Button {
@@ -95,12 +110,14 @@ private struct TopBar: View {
                     .disabled(store.selectedEntry == nil)
                     .help("Copy path")
                 }
+                .layoutPriority(2)
 
                 ToolbarCluster {
                     SortMenu()
                     ToolbarGroupDivider()
                     MatchOptionButtons()
                 }
+                .layoutPriority(2)
             }
         }
         .buttonStyle(.plain)
@@ -726,6 +743,7 @@ private struct ToggleButton: View {
 
 private struct SearchField: View {
     @Binding var text: String
+    var isFocused: FocusState<Bool>.Binding
     var onSubmit: () -> Void = {}
 
     var body: some View {
@@ -736,6 +754,7 @@ private struct SearchField: View {
             TextField("Search", text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 16, weight: .regular, design: .default))
+                .focused(isFocused)
                 .onSubmit(onSubmit)
 
             if !text.isEmpty {
@@ -777,6 +796,20 @@ private struct ResultHeader: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 7)
         .background(Color(nsColor: .controlBackgroundColor))
+        .contextMenu {
+            ForEach(ResultColumn.allCases) { column in
+                Button {
+                    store.toggleColumn(column)
+                } label: {
+                    HStack {
+                        Text(column.displayName)
+                        if store.visibleColumns.contains(column) {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -808,24 +841,79 @@ private struct ResultArea: View {
 
     var body: some View {
         ZStack {
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(store.results) { entry in
-                        ResultRow(
-                            entry: entry,
-                            isSelected: store.selectedPath == entry.path
-                        )
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            store.selectedPath = entry.path
-                        }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(store.results.enumerated()), id: \.element.id) { index, entry in
+                            ResultRow(
+                                entry: entry,
+                                isSelected: store.selectedPaths.contains(entry.path),
+                                isEvenRow: index.isMultiple(of: 2)
+                            )
+                            .id(entry.path)
+                            .contentShape(Rectangle())
                         .onTapGesture(count: 2) {
                             store.selectedPath = entry.path
+                            store.selectedPaths = [entry.path]
                             store.openSelected()
                         }
+                        .onTapGesture {
+                            let flags = NSEvent.modifierFlags
+                            store.selectEntry(
+                                entry,
+                                commandDown: flags.contains(.command),
+                                shiftDown: flags.contains(.shift)
+                            )
+                        }
+                        .contextMenu {
+                            Button("Open") {
+                                store.selectedPath = entry.path
+                                store.openSelected()
+                            }
+
+                            Button("Reveal in Finder") {
+                                store.selectedPath = entry.path
+                                store.revealSelected()
+                            }
+
+                            Divider()
+
+                            Button("Copy Path") {
+                                store.selectedPath = entry.path
+                                store.copySelectedPath()
+                            }
+
+                            Button("Copy Name") {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(entry.name, forType: .string)
+                            }
+                        }
+                        .onDrag {
+                            NSItemProvider(object: URL(fileURLWithPath: entry.path) as NSURL)
+                        }
+                    }
+
+                    if store.totalMatches > store.results.count {
+                        HStack(spacing: 6) {
+                            Image(systemName: "ellipsis")
+                                .foregroundStyle(.tertiary)
+                            Text("\((store.totalMatches - store.results.count).formatted()) more results — refine your search to see them")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
                     }
                 }
                 .padding(.vertical, 4)
+                }
+                .onChange(of: store.selectedPath) { _, newPath in
+                    if let path = newPath {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            proxy.scrollTo(path, anchor: .center)
+                        }
+                    }
+                }
             }
 
             if store.isIndexing || store.isLoadingIndex {
@@ -836,6 +924,32 @@ private struct ResultArea: View {
                 EmptyResultView()
             }
         }
+        .onMoveCommand { direction in
+            switch direction {
+            case .down:
+                store.moveSelection(offset: 1)
+            case .up:
+                store.moveSelection(offset: -1)
+            default:
+                break
+            }
+        }
+        .onKeyPress(.return) {
+            store.openSelectedOrFirst()
+            return .handled
+        }
+        .onKeyPress(.space) {
+            let paths: [String]
+            if store.selectedPaths.count > 1 {
+                paths = store.results.filter { store.selectedPaths.contains($0.path) }.map(\.path)
+            } else if let entry = store.selectedEntry {
+                paths = [entry.path]
+            } else {
+                return .ignored
+            }
+            QuickLookController.shared.toggle(paths: paths)
+            return .handled
+        }
     }
 }
 
@@ -844,6 +958,7 @@ private struct ResultRow: View {
 
     let entry: FileEntry
     let isSelected: Bool
+    let isEvenRow: Bool
 
     var body: some View {
         HStack(spacing: 0) {
@@ -857,9 +972,12 @@ private struct ResultRow: View {
         .padding(.vertical, 6)
         .background(
             isSelected
-                ? Color.accentColor.opacity(0.18)
-                : Color.clear
+                ? Color.accentColor.opacity(0.25)
+                : isEvenRow
+                    ? Color.clear
+                    : Color(nsColor: .controlBackgroundColor).opacity(0.4)
         )
+        .help(entry.path)
     }
 }
 
@@ -998,18 +1116,27 @@ private extension View {
 }
 
 private struct LoadingIndexView: View {
+    @EnvironmentObject private var store: SearchStore
+
     var body: some View {
         VStack(spacing: 10) {
             ProgressView()
                 .controlSize(.large)
-            Text("Loading index")
+            Text(store.isIndexing ? "Indexing" : "Loading index")
                 .font(.headline)
                 .foregroundStyle(.secondary)
+            Text(store.statusText)
+                .font(.subheadline)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.middle)
         }
     }
 }
 
 private struct EmptyIndexView: View {
+    @EnvironmentObject private var store: SearchStore
+
     var body: some View {
         VStack(spacing: 10) {
             Image(systemName: "folder.badge.questionmark")
@@ -1018,6 +1145,11 @@ private struct EmptyIndexView: View {
             Text("No index")
                 .font(.headline)
                 .foregroundStyle(.secondary)
+            Button("Choose Folder to Index") {
+                store.chooseRoot()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
         }
     }
 }
@@ -1031,6 +1163,9 @@ private struct EmptyResultView: View {
             Text("No results")
                 .font(.headline)
                 .foregroundStyle(.secondary)
+            Text("Try a different search or adjust filters")
+                .font(.subheadline)
+                .foregroundStyle(.tertiary)
         }
     }
 }
@@ -1157,13 +1292,17 @@ private struct StatusBar: View {
 }
 
 private extension FileEntry {
+    nonisolated(unsafe) private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter
+    }()
+
     var modifiedDescription: String {
         guard let modifiedAt else {
             return "-"
         }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter.localizedString(for: modifiedAt, relativeTo: Date())
+        return Self.relativeFormatter.localizedString(for: modifiedAt, relativeTo: Date())
     }
 
     var sizeDescription: String {
@@ -1193,8 +1332,6 @@ private extension FileEntry {
         guard let date else {
             return "-"
         }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter.localizedString(for: date, relativeTo: Date())
+        return Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
     }
 }

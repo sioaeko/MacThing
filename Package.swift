@@ -11,7 +11,8 @@ let package = Package(
         .library(name: "MacThingCore", targets: ["MacThingCore"]),
         .executable(name: "MacThing", targets: ["MacThing"]),
         .executable(name: "MacThingCLI", targets: ["MacThingCLI"]),
-        .executable(name: "MacThingSelfTest", targets: ["MacThingSelfTest"])
+        .executable(name: "MacThingSelfTest", targets: ["MacThingSelfTest"]),
+        .executable(name: "MacThingBenchmark", targets: ["MacThingBenchmark"])
     ],
     targets: [
         .systemLibrary(name: "CSQLite"),
@@ -29,6 +30,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "MacThingSelfTest",
+            dependencies: ["MacThingCore"]
+        ),
+        .executableTarget(
+            name: "MacThingBenchmark",
             dependencies: ["MacThingCore"]
         )
     ]

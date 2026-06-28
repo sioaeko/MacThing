@@ -655,11 +655,23 @@ public struct SearchCandidateExistsFilter: Sendable {
     public let allowedKinds: Set<FileKind>?
     public let pathValue: String?
     public let relativeName: String?
+    public let pathValues: Set<String>
+    public let relativeNames: Set<String>
 
     public init(allowedKinds: Set<FileKind>?, pathValue: String?, relativeName: String?) {
         self.allowedKinds = allowedKinds
         self.pathValue = pathValue
         self.relativeName = relativeName
+        pathValues = pathValue.map { [$0] } ?? []
+        relativeNames = relativeName.map { [$0] } ?? []
+    }
+
+    public init(allowedKinds: Set<FileKind>?, pathValues: Set<String>, relativeNames: Set<String>) {
+        self.allowedKinds = allowedKinds
+        self.pathValues = pathValues
+        self.relativeNames = relativeNames
+        pathValue = pathValues.count == 1 && relativeNames.isEmpty ? pathValues.first : nil
+        relativeName = relativeNames.count == 1 && pathValues.isEmpty ? relativeNames.first : nil
     }
 }
 
@@ -1175,6 +1187,7 @@ public enum SearchEngine {
             options: request.options,
             buildFullIndexes: shouldBuildFullContext
         )
+
         var resultWindow = MatchWindow(
             request: effectiveRequest,
             field: effectiveRequest.sortField,
@@ -1716,37 +1729,50 @@ public enum SearchEngine {
             return true
         }
 
-        func addExistsCandidateHint(value: String, allowedKinds: Set<FileKind>?) -> Bool {
-            let normalizedValue = value
-                .replacingOccurrences(of: "\\", with: "/")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if normalizedValue.isEmpty {
+        func addExistsCandidateHint(rawValue: String, value: String, allowedKinds: Set<FileKind>?) -> Bool {
+            let values: [String]
+            if rawValue.contains(";") {
+                guard let parsedValues = semicolonDelimitedValues(from: rawValue) else {
+                    return false
+                }
+                values = parsedValues
+            } else {
+                values = [value]
+            }
+
+            var pathValues = Set<String>()
+            var relativeNames = Set<String>()
+            for rawCandidate in values {
+                let normalizedValue = rawCandidate
+                    .replacingOccurrences(of: "\\", with: "/")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if normalizedValue.isEmpty {
+                    continue
+                }
+
+                guard !normalizedValue.contains("*"),
+                      !normalizedValue.contains("?"),
+                      !normalizedValue.contains("$") else {
+                    return false
+                }
+
+                if normalizedValue.contains("/") {
+                    pathValues.insert(normalizedFolderPath(normalizedValue))
+                } else {
+                    relativeNames.insert(normalizedValue)
+                }
+            }
+
+            if pathValues.isEmpty, relativeNames.isEmpty {
                 return true
             }
-
-            guard !normalizedValue.contains("*"),
-                  !normalizedValue.contains("?"),
-                  !normalizedValue.contains("$") else {
-                return false
-            }
-
-            if normalizedValue.contains("/") {
-                existsFilters.append(
-                    SearchCandidateExistsFilter(
-                        allowedKinds: allowedKinds,
-                        pathValue: normalizedFolderPath(normalizedValue),
-                        relativeName: nil
-                    )
+            existsFilters.append(
+                SearchCandidateExistsFilter(
+                    allowedKinds: allowedKinds,
+                    pathValues: pathValues,
+                    relativeNames: relativeNames
                 )
-            } else {
-                existsFilters.append(
-                    SearchCandidateExistsFilter(
-                        allowedKinds: allowedKinds,
-                        pathValue: nil,
-                        relativeName: normalizedValue
-                    )
-                )
-            }
+            )
             return true
         }
 
@@ -1898,7 +1924,8 @@ public enum SearchEngine {
                     case "ext", "extension", "type", "kind", "category",
                          "pathlist", "fullpathlist",
                          "parent", "infolder", "nosubfolders",
-                         "filelist", "frn":
+                         "filelist", "frn",
+                         "exists", "fileexists", "folderexists":
                         break
                     default:
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
@@ -2446,15 +2473,15 @@ public enum SearchEngine {
                         requiresEmptyEntry = true
                     }
                 case "exists":
-                    guard addExistsCandidateHint(value: value, allowedKinds: nil) else {
+                    guard addExistsCandidateHint(rawValue: rawValue, value: value, allowedKinds: nil) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
                 case "fileexists":
-                    guard addExistsCandidateHint(value: value, allowedKinds: [.file, .symlink, .other]) else {
+                    guard addExistsCandidateHint(rawValue: rawValue, value: value, allowedKinds: [.file, .symlink, .other]) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
                 case "folderexists":
-                    guard addExistsCandidateHint(value: value, allowedKinds: [.folder, .package]) else {
+                    guard addExistsCandidateHint(rawValue: rawValue, value: value, allowedKinds: [.folder, .package]) else {
                         return SearchCandidateHint(terms: [], canUseDatabaseCandidates: false)
                     }
                 case "pathlist", "fullpathlist":
@@ -3322,20 +3349,20 @@ private struct SearchContext {
             return
         }
 
-        var nameCounts: [String: Int] = [:]
-        var namePartCounts: [String: Int] = [:]
-        var extensionCounts: [String: Int] = [:]
-        var pathPartCounts: [String: Int] = [:]
-        var sizeCounts: [Int64: Int] = [:]
-        var createdCounts: [TimeInterval: Int] = [:]
-        var modifiedCounts: [TimeInterval: Int] = [:]
-        var accessedCounts: [TimeInterval: Int] = [:]
-        var attributes: [Int: Int] = [:]
-        var childCounts: [String: Int] = [:]
-        var childFileCounts: [String: Int] = [:]
-        var childFolderCounts: [String: Int] = [:]
-        var children: [String: [FileEntry]] = [:]
-        var entriesByPath: [String: FileEntry] = [:]
+        var nameCounts: [String: Int] = Dictionary(minimumCapacity: entries.count)
+        var namePartCounts: [String: Int] = Dictionary(minimumCapacity: entries.count)
+        var extensionCounts: [String: Int] = Dictionary(minimumCapacity: 256)
+        var pathPartCounts: [String: Int] = Dictionary(minimumCapacity: entries.count / 4)
+        var sizeCounts: [Int64: Int] = Dictionary(minimumCapacity: entries.count)
+        var createdCounts: [TimeInterval: Int] = Dictionary(minimumCapacity: entries.count)
+        var modifiedCounts: [TimeInterval: Int] = Dictionary(minimumCapacity: entries.count)
+        var accessedCounts: [TimeInterval: Int] = Dictionary(minimumCapacity: entries.count)
+        var attributes: [Int: Int] = Dictionary(minimumCapacity: 16)
+        var childCounts: [String: Int] = Dictionary(minimumCapacity: entries.count / 4)
+        var childFileCounts: [String: Int] = Dictionary(minimumCapacity: entries.count / 4)
+        var childFolderCounts: [String: Int] = Dictionary(minimumCapacity: entries.count / 8)
+        var children: [String: [FileEntry]] = Dictionary(minimumCapacity: entries.count / 4)
+        var entriesByPath: [String: FileEntry] = Dictionary(minimumCapacity: entries.count)
         var sourceKeys = Set<String>()
 
         for entry in entries {
@@ -3622,9 +3649,9 @@ private final class SearchNormalizationCache {
 
     init(options: SearchOptions, capacity: Int) {
         self.options = options
-        normalizedNamesByPath.reserveCapacity(min(capacity, 8_192))
-        normalizedNamePartsByPath.reserveCapacity(min(capacity, 8_192))
-        normalizedPathsByPath.reserveCapacity(min(capacity, 8_192))
+        normalizedNamesByPath.reserveCapacity(min(capacity, 65_536))
+        normalizedNamePartsByPath.reserveCapacity(min(capacity, 65_536))
+        normalizedPathsByPath.reserveCapacity(min(capacity, 65_536))
     }
 
     func normalizedLiteral(_ value: String, options: SearchOptions) -> String {

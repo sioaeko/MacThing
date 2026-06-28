@@ -142,6 +142,12 @@ private struct CompactSearchView: View {
 
                 Spacer()
 
+                if store.selectedPath != nil {
+                    Text("↩ to open")
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+
                 Text(store.rootPath)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -259,7 +265,7 @@ private struct CompactResultRow: View {
         .padding(.vertical, 8)
         .background(
             isSelected
-                ? Color.accentColor.opacity(0.18)
+                ? Color.accentColor.opacity(0.25)
                 : Color.clear
         )
     }

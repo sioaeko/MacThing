@@ -218,23 +218,33 @@ public struct FileEntry: Codable, Hashable, Identifiable, Sendable {
     }
 
     public var extensionName: String {
-        URL(fileURLWithPath: path).pathExtension
+        guard let dotIndex = name.lastIndex(of: "."),
+              dotIndex != name.startIndex else {
+            return ""
+        }
+        return String(name[name.index(after: dotIndex)...])
     }
 
     public var namePart: String {
-        let extensionName = URL(fileURLWithPath: name).pathExtension
-        guard !extensionName.isEmpty,
-              name.count > extensionName.count + 1 else {
+        guard let dotIndex = name.lastIndex(of: "."),
+              dotIndex != name.startIndex else {
             return name
         }
-        return String(name.dropLast(extensionName.count + 1))
+        return String(name[..<dotIndex])
     }
 
     public var depth: Int {
         guard !parent.isEmpty, parent != "/" else {
             return 0
         }
-        return parent.split(separator: "/").count
+        var count = 0
+        for c in parent.utf8 {
+            if c == UInt8(ascii: "/") {
+                count += 1
+            }
+        }
+        // Leading slash doesn't count as a depth level
+        return parent.first == "/" ? count - 1 : count
     }
 
     public var runCountValue: Int {
