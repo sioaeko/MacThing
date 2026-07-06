@@ -16,6 +16,7 @@ struct SettingsView: View {
 private struct ShortcutSettingsPane: View {
     @EnvironmentObject private var store: SearchStore
     @State private var shortcutSearchText = ""
+    @State private var mappingFilter = ShortcutMappingFilter.all
 
     var body: some View {
         let query = shortcutSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -25,7 +26,8 @@ private struct ShortcutSettingsPane: View {
             detail: "Open the floating search palette from anywhere",
             value: store.globalHotkeyChoice.shortcut,
             defaultValue: GlobalHotkeyChoice.recommended.shortcut,
-            normalizedQuery: normalizedQuery
+            normalizedQuery: normalizedQuery,
+            mappingFilter: mappingFilter
         )
 
         ScrollView {
@@ -43,33 +45,46 @@ private struct ShortcutSettingsPane: View {
                     }
                 }
 
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
+                HStack(spacing: 12) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(.secondary)
 
-                    TextField("Filter commands or shortcuts", text: $shortcutSearchText)
-                        .textFieldStyle(.plain)
+                        TextField("Filter commands or shortcuts", text: $shortcutSearchText)
+                            .textFieldStyle(.plain)
 
-                    if !shortcutSearchText.isEmpty {
-                        Button {
-                            shortcutSearchText = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
+                        if !shortcutSearchText.isEmpty {
+                            Button {
+                                shortcutSearchText = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Clear filter")
                         }
-                        .buttonStyle(.plain)
-                        .help("Clear filter")
                     }
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background {
-                    RoundedRectangle(cornerRadius: 7)
-                        .fill(Color(nsColor: .controlBackgroundColor))
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 7)
-                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background {
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(Color(nsColor: .controlBackgroundColor))
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 7)
+                            .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                    }
+
+                    Picker("Shortcut filter", selection: $mappingFilter) {
+                        ForEach(ShortcutMappingFilter.allCases) { filter in
+                            Text(filter.displayName)
+                                .tag(filter)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 260)
+                    .help("Filter shortcut rows")
                 }
 
                 if showsGlobalHotkey {
@@ -124,8 +139,8 @@ private struct ShortcutSettingsPane: View {
                     }
                 }
 
-                if !query.isEmpty && !showsGlobalHotkey && filteredActionCount(normalizedQuery: normalizedQuery) == 0 {
-                    ContentUnavailableView.search(text: query)
+                if !showsGlobalHotkey && filteredActionCount(normalizedQuery: normalizedQuery) == 0 {
+                    ShortcutMappingEmptyState(query: query, filter: mappingFilter)
                         .frame(maxWidth: .infinity, minHeight: 180)
                 }
 
@@ -146,7 +161,8 @@ private struct ShortcutSettingsPane: View {
                     detail: action.settingDetail,
                     value: store.appShortcutSettings.choice(for: action),
                     defaultValue: action.defaultChoice,
-                    normalizedQuery: normalizedQuery
+                    normalizedQuery: normalizedQuery,
+                    mappingFilter: mappingFilter
                 )
         }
     }
@@ -158,7 +174,8 @@ private struct ShortcutSettingsPane: View {
                 detail: action.settingDetail,
                 value: store.appShortcutSettings.choice(for: action),
                 defaultValue: action.defaultChoice,
-                normalizedQuery: normalizedQuery
+                normalizedQuery: normalizedQuery,
+                mappingFilter: mappingFilter
             )
         }.count
     }
@@ -168,12 +185,26 @@ private struct ShortcutSettingsPane: View {
         detail: String,
         value: AppShortcutChoice,
         defaultValue: AppShortcutChoice,
-        normalizedQuery: String
+        normalizedQuery: String,
+        mappingFilter: ShortcutMappingFilter
     ) -> Bool {
+        let isDefault = value == defaultValue
+        switch mappingFilter {
+        case .all:
+            break
+        case .modified:
+            guard !isDefault else {
+                return false
+            }
+        case .disabled:
+            guard value == .disabled else {
+                return false
+            }
+        }
+
         guard !normalizedQuery.isEmpty else {
             return true
         }
-
         return [
             title,
             detail,
@@ -181,6 +212,60 @@ private struct ShortcutSettingsPane: View {
             defaultValue.displayName
         ].contains { text in
             text.lowercased().contains(normalizedQuery)
+        }
+    }
+}
+
+private struct ShortcutMappingEmptyState: View {
+    let query: String
+    let filter: ShortcutMappingFilter
+
+    var body: some View {
+        if !query.isEmpty {
+            ContentUnavailableView.search(text: query)
+        } else {
+            ContentUnavailableView(filter.emptyTitle, systemImage: filter.emptySystemImage)
+        }
+    }
+}
+
+private enum ShortcutMappingFilter: String, CaseIterable, Identifiable {
+    case all
+    case modified
+    case disabled
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .all:
+            return "All"
+        case .modified:
+            return "Modified"
+        case .disabled:
+            return "Disabled"
+        }
+    }
+
+    var emptyTitle: String {
+        switch self {
+        case .all:
+            return "No Shortcuts"
+        case .modified:
+            return "No Modified Shortcuts"
+        case .disabled:
+            return "No Disabled Shortcuts"
+        }
+    }
+
+    var emptySystemImage: String {
+        switch self {
+        case .all:
+            return "keyboard"
+        case .modified:
+            return "pencil.slash"
+        case .disabled:
+            return "keyboard.badge.ellipsis"
         }
     }
 }
