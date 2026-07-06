@@ -2548,6 +2548,7 @@ final class SearchStore: ObservableObject {
         }
 
         let hint = SearchEngine.candidateHint(for: request)
+            .resolvingFuzzyCandidatePolicy(fuzzyMatching: request.options.fuzzyMatching)
         guard hint.canUseDatabaseCandidates else {
             return nil
         }

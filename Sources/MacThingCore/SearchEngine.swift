@@ -1,5 +1,7 @@
 import Foundation
 import ImageIO
+import UniformTypeIdentifiers
+import CryptoKit
 
 private func canonicalSearchFunctionName<S: StringProtocol>(_ value: S) -> String {
     value.lowercased().replacingOccurrences(of: "-", with: "")
@@ -223,7 +225,8 @@ private func supportsFunctionValueSubexpression(function: String) -> Bool {
          "startwith", "startswith", "beginwith", "beginswith", "begin",
          "endwith", "endswith", "end",
          "type", "kind", "category",
-         "content", "ansicontent", "utf8content", "utf16content", "utf16becontent":
+         "content", "ansicontent", "utf8content", "utf16content", "utf16becontent",
+         "mime", "mimetype", "mime-type", "contenttype", "content-type":
         return true
     default:
         return false
@@ -895,8 +898,8 @@ public struct SearchCandidatePathListFilter: Sendable {
 }
 
 public struct SearchCandidateHint: Sendable {
-    public let terms: [String]
-    public let canUseDatabaseCandidates: Bool
+    public internal(set) var terms: [String]
+    public internal(set) var canUseDatabaseCandidates: Bool
     public let extensions: Set<String>
     public let kinds: Set<FileKind>
     public let requiredAttributes: FileAttributes
@@ -1051,6 +1054,25 @@ public struct SearchCandidateHint: Sendable {
             requiresNonEmptyEntry ||
             !parentPaths.isEmpty ||
             !folderTreePaths.isEmpty
+    }
+
+    /// Applies the fuzzy-search candidate policy. Plain text terms are matched
+    /// by subsequence under fuzzy, but database term candidates (substring
+    /// LIKE / FTS) only return substring matches — a strict subset — so pushing
+    /// a term down under fuzzy would silently drop subsequence-only matches.
+    /// Under fuzzy we therefore drop the text terms and let them be evaluated
+    /// in memory, while keeping any structured filters (extension, kind, size,
+    /// name:/wfn: exact filters, …) which are exact and push down safely. With
+    /// no structured filters left, the query falls back to a full in-memory
+    /// scan (canUseDatabaseCandidates becomes false).
+    public func resolvingFuzzyCandidatePolicy(fuzzyMatching: Bool) -> SearchCandidateHint {
+        guard fuzzyMatching, !terms.isEmpty else {
+            return self
+        }
+        var copy = self
+        copy.terms = []
+        copy.canUseDatabaseCandidates = hasStructuredFilters
+        return copy
     }
 
     public func databaseCandidateLimit(requestedWindowEnd: Int) -> Int {
@@ -2578,6 +2600,12 @@ public enum SearchEngine {
                 case "attribdupe", "attrdupe":
                     addDuplicateMetricCandidateHint(value: value, field: .attributeFrequency)
                 case "content", "ansicontent", "utf8content", "utf16content", "utf16becontent",
+                     "mime", "mimetype", "contenttype",
+                     "contentdupe", "contentdupes", "dupecontent", "duplicatecontent",
+                     "linkcount", "links", "hardlinks", "hardlinkcount", "nlink",
+                     "perm", "perms", "permission", "permissions", "mode",
+                     "owner", "user", "uid", "ownername", "username",
+                     "group", "gid", "groupname",
                      "regex", "nothing",
                      "fsi",
                      "width", "height", "bitdepth",
@@ -2876,9 +2904,18 @@ public enum SearchEngine {
     }
 
     static func normalizedFolderPath(_ value: String) -> String {
-        var normalized = (value as NSString)
-            .expandingTildeInPath
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // `expandingTildeInPath` bridges through NSString and is ~24x more
+        // expensive than plain trimming. It only matters when the value starts
+        // with '~', which indexed absolute paths never do, so take that hit
+        // only when a tilde is actually present.
+        var normalized: String
+        if value.utf8.first == UInt8(ascii: "~") {
+            normalized = (value as NSString)
+                .expandingTildeInPath
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
 
         while normalized.count > 1, normalized.hasSuffix("/") {
             normalized.removeLast()
@@ -2887,8 +2924,147 @@ public enum SearchEngine {
         return normalized
     }
 
+    /// Hard-link count (`st_nlink`) for a file, read via `stat()` at query time
+    /// (not indexed). Returns nil if the file can't be stat'd. Cheap (~1µs/file)
+    /// so it's used directly per entry by the on-demand `linkcount:` operator.
+    static func hardLinkCount(ofFileAt path: String) -> Int? {
+        var info = stat()
+        guard stat(path, &info) == 0 else {
+            return nil
+        }
+        return Int(info.st_nlink)
+    }
+
+    /// POSIX permission bits (`st_mode & 07777`, including setuid/setgid/sticky)
+    /// for a file, read via `stat()` at query time (not indexed). Returns nil if
+    /// the file can't be stat'd. Used by the on-demand `perm:` operator.
+    static func permissionBits(ofFileAt path: String) -> UInt16? {
+        var info = stat()
+        guard stat(path, &info) == 0 else {
+            return nil
+        }
+        // truncatingIfNeeded is a no-op on macOS (mode_t == UInt16) but avoids a
+        // trap if this ever builds where mode_t is wider (e.g. UInt32 on Linux).
+        return UInt16(truncatingIfNeeded: info.st_mode) & 0o7777
+    }
+
+    /// Owner uid / group gid (`st_uid` / `st_gid`) for a file, read via `stat()`
+    /// at query time (not indexed). Returns nil if the file can't be stat'd.
+    /// Used by the on-demand `owner:` / `group:` operators.
+    static func ownerIDs(ofFileAt path: String) -> (uid: UInt32, gid: UInt32)? {
+        var info = stat()
+        guard stat(path, &info) == 0 else {
+            return nil
+        }
+        return (UInt32(info.st_uid), UInt32(info.st_gid))
+    }
+
+    /// Resolves a `owner:`/`group:` query value to a numeric id: a bare number is
+    /// taken directly; otherwise it's looked up as a user/group name. Done once
+    /// per query (not per entry), so the score path is a plain integer compare.
+    static func resolveUserID(_ value: String) -> UInt32? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+        if let numeric = UInt32(trimmed) {
+            return numeric
+        }
+        guard let pw = getpwnam(trimmed) else {
+            return nil
+        }
+        return UInt32(pw.pointee.pw_uid)
+    }
+
+    static func resolveGroupID(_ value: String) -> UInt32? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+        if let numeric = UInt32(trimmed) {
+            return numeric
+        }
+        guard let gr = getgrnam(trimmed) else {
+            return nil
+        }
+        return UInt32(gr.pointee.gr_gid)
+    }
+
+    /// Native last-path-component, mirroring `URL(fileURLWithPath:).lastPathComponent`
+    /// for the absolute paths the index holds, but ~6.5x faster by avoiding the
+    /// URL/NSString bridge. Strips trailing slashes, then returns the segment
+    /// after the final slash ("/" for an all-slash input).
+    static func lastPathComponent(of path: String) -> String {
+        var end = path.endIndex
+        while end > path.startIndex, path[path.index(before: end)] == "/" {
+            end = path.index(before: end)
+        }
+        guard end > path.startIndex else {
+            return "/"
+        }
+        if let slash = path[path.startIndex..<end].lastIndex(of: "/") {
+            return String(path[path.index(after: slash)..<end])
+        }
+        return String(path[path.startIndex..<end])
+    }
+
+    /// Native parent-directory path, mirroring
+    /// `URL(fileURLWithPath:).deletingLastPathComponent().path` for the
+    /// well-formed absolute paths the index holds, ~9x faster by avoiding the
+    /// URL bridge. Falls back to URL for relative paths or paths containing
+    /// "//", where URL applies normalization the fast path does not replicate.
+    static func parentDirectoryPath(of path: String) -> String {
+        guard path.utf8.first == UInt8(ascii: "/"), !path.contains("//") else {
+            return URL(fileURLWithPath: path).deletingLastPathComponent().path
+        }
+        var end = path.endIndex
+        while end > path.startIndex, path[path.index(before: end)] == "/" {
+            end = path.index(before: end)
+        }
+        guard end > path.startIndex else {
+            return "/"
+        }
+        guard let slash = path[path.startIndex..<end].lastIndex(of: "/") else {
+            return "/"
+        }
+        if slash == path.startIndex {
+            return "/"
+        }
+        return String(path[path.startIndex..<slash])
+    }
+
     static func isAbsoluteSearchPath(_ value: String) -> Bool {
         value.hasPrefix("/")
+    }
+
+    /// Computes the chain of ancestor folder paths for a given (already
+    /// normalized) starting folder, from the immediate folder up to the root.
+    /// Depends only on the path string — not on the query or options — so the
+    /// result can be safely memoized by folder path across entries that share
+    /// a parent (the common case: many files per directory).
+    static func ancestorPathChain(fromFolder folder: String) -> [String] {
+        var paths: [String] = []
+        var current = folder
+        var seen = Set<String>()
+
+        while !current.isEmpty, !seen.contains(current) {
+            paths.append(current)
+            seen.insert(current)
+
+            guard current != "/" else {
+                break
+            }
+
+            let parent = SearchEngine.normalizedFolderPath(
+                SearchEngine.parentDirectoryPath(of: current)
+            )
+            guard parent != current else {
+                break
+            }
+            current = parent
+        }
+
+        return paths
     }
 
     static func knownShellFolderPath(_ rawValue: String) -> String? {
@@ -2978,26 +3154,121 @@ public enum SearchEngine {
     }
 
     static func normalize(_ value: String, caseSensitive: Bool = false) -> String {
-        var options: String.CompareOptions = []
-        if !caseSensitive {
-            options.insert(.caseInsensitive)
-        }
-        options.insert(.diacriticInsensitive)
-        return options.isEmpty ? value : value.folding(options: options, locale: .current)
+        normalize(value, caseFold: !caseSensitive, diacriticFold: true)
     }
 
     static func normalize(_ value: String, options searchOptions: SearchOptions) -> String {
+        normalize(
+            value,
+            caseFold: !searchOptions.caseSensitive,
+            diacriticFold: !searchOptions.diacriticSensitive
+        )
+    }
+
+    /// Whether the current locale uses Turkish-style case folding (dotless ı),
+    /// where ASCII `I`/`i` do not fold the same way `folding(locale:)` would.
+    /// Computed once; the ASCII fast path is skipped for these locales so the
+    /// result stays byte-identical to Foundation's locale-aware folding.
+    private static let usesTurkishCaseFolding: Bool = {
+        let code = Locale.current.language.languageCode?.identifier
+        return code == "tr" || code == "az"
+    }()
+
+    private static func normalize(_ value: String, caseFold: Bool, diacriticFold: Bool) -> String {
+        // Nothing to do — preserve the original value (case- and diacritic-sensitive).
+        guard caseFold || diacriticFold else {
+            return value
+        }
+
+        // Fast path: pure-ASCII strings have no diacritics to fold, and case
+        // folding reduces to lowercasing A–Z (outside Turkish/Azeri locales).
+        // This avoids Foundation's expensive Unicode `folding` machinery, which
+        // dominates the per-entry search cost when names are ASCII.
+        if !(caseFold && usesTurkishCaseFolding),
+           let folded = asciiFolded(value, caseFold: caseFold) {
+            return folded
+        }
+
         var options: String.CompareOptions = []
-        if !searchOptions.caseSensitive {
+        if caseFold {
             options.insert(.caseInsensitive)
         }
-        if !searchOptions.diacriticSensitive {
+        if diacriticFold {
             options.insert(.diacriticInsensitive)
         }
-        return options.isEmpty ? value : value.folding(options: options, locale: .current)
+        return value.folding(options: options, locale: .current)
+    }
+
+    /// Returns the ASCII-folded form of `value`, or `nil` if `value` contains
+    /// any non-ASCII byte (in which case the caller must use full Unicode folding).
+    /// Allocates only when a character actually needs lowercasing.
+    @inline(__always)
+    private static func asciiFolded(_ value: String, caseFold: Bool) -> String? {
+        let utf8 = value.utf8
+        var needsLowercasing = false
+        for byte in utf8 {
+            if byte >= 0x80 {
+                return nil
+            }
+            if caseFold, byte >= 0x41, byte <= 0x5A {
+                needsLowercasing = true
+            }
+        }
+        guard needsLowercasing else {
+            return value
+        }
+        var bytes = [UInt8]()
+        bytes.reserveCapacity(utf8.count)
+        for byte in utf8 {
+            bytes.append(byte >= 0x41 && byte <= 0x5A ? byte + 0x20 : byte)
+        }
+        return String(decoding: bytes, as: UTF8.self)
+    }
+
+    /// Diacritic-insensitive folding with an ASCII fast path. Pure-ASCII strings
+    /// have no diacritics, so folding is a no-op and the original is returned
+    /// without invoking Foundation's expensive `folding` (the regex candidate
+    /// path calls this per entry on name + path). Behavior-identical to
+    /// `value.folding(options: [.diacriticInsensitive], locale: .current)`.
+    static func diacriticFolded(_ value: String) -> String {
+        for byte in value.utf8 where byte >= 0x80 {
+            return value.folding(options: [.diacriticInsensitive], locale: .current)
+        }
+        return value
     }
 
     static func isSubsequence(_ needle: String, of haystack: String) -> Bool {
+        guard !needle.isEmpty else {
+            return true
+        }
+
+        // Fast path: when both strings are pure ASCII, byte comparison is
+        // equivalent to Character comparison but avoids Swift's grapheme-cluster
+        // segmentation, which dominates the per-entry cost on the fuzzy path.
+        let needleBytes = needle.utf8
+        for byte in needleBytes where byte >= 0x80 {
+            return isSubsequenceByCharacter(needle, of: haystack)
+        }
+        var cursor = needleBytes.startIndex
+        var target = needleBytes[cursor]
+        for byte in haystack.utf8 {
+            if byte >= 0x80 {
+                // Non-ASCII in the haystack: fall back to grapheme-aware matching.
+                return isSubsequenceByCharacter(needle, of: haystack)
+            }
+            if byte == target {
+                cursor = needleBytes.index(after: cursor)
+                if cursor == needleBytes.endIndex {
+                    return true
+                }
+                target = needleBytes[cursor]
+            }
+        }
+
+        return false
+    }
+
+    private static func isSubsequenceByCharacter(_ needle: String, of haystack: String) -> Bool {
         guard !needle.isEmpty else {
             return true
         }
@@ -3306,94 +3577,336 @@ private struct SearchMatch {
     let entry: FileEntry
 }
 
+/// Holds the SearchContext index structures that are expensive to build and
+/// only needed by a subset of operators, deferring their construction until a
+/// scoring path actually reads them. `childrenByParentPath` copies FileEntry
+/// arrays; `fileSystemIndexBySourceKey` derives a key per entry (URL parsing on
+/// the fallback path) and sorts all keys — wasted work for the common
+/// full-context queries (`dupe:`, `childcount:`, `empty:`) that never touch
+/// them. The search loop is single-threaded, matching SearchNormalizationCache's
+/// existing unsynchronized-lazy assumption.
+private struct ContentDuplicationResult {
+    /// Paths whose content is byte-identical to another examined file's.
+    let duplicates: Set<String>
+    /// Paths that were actually examined (hashed, or unique-size hence
+    /// content-unique). Files skipped (unreadable / over cap / no size) are
+    /// absent, so they match neither contentdupe: nor contentdupe:0.
+    let examined: Set<String>
+}
+
+private final class SearchContextLazyIndexes {
+    private let entries: [FileEntry]
+    private let options: SearchOptions
+    private var _childrenByParentPath: [String: [FileEntry]]?
+    private var _fileSystemIndexBySourceKey: [String: Int]?
+    private var _normalizedNameCounts: [String: Int]?
+    private var _normalizedNamePartCounts: [String: Int]?
+    private var _normalizedExtensionCounts: [String: Int]?
+    private var _normalizedPathPartCounts: [String: Int]?
+    // The numeric duplicate-frequency tables (size/created/modified/accessed/
+    // attributes) are read only by the rare dupe-size:/dupe-date:/dupe-attr:
+    // operators, never by the common dupe:/childcount:/empty:. Build all five in
+    // one lazy pass (preserving the old single-loop property) so common
+    // full-context queries skip ~16ms/100k of dictionary construction.
+    private var _numericDuplicateCountsBuilt = false
+    private var _byteSizeCounts: [Int64: Int] = [:]
+    private var _createdAtCounts: [TimeInterval: Int] = [:]
+    private var _modifiedAtCounts: [TimeInterval: Int] = [:]
+    private var _accessedAtCounts: [TimeInterval: Int] = [:]
+    private var _attributeCounts: [Int: Int] = [:]
+    // Memoized per folder path (not prebuilt): files sharing a parent share
+    // their ancestor chain, so this is filled lazily as ancestor predicates run.
+    private var _ancestorChainsByFolder: [String: [String]] = [:]
+    // Memoized extension → preferred MIME type. UTType lookup is ~87x slower
+    // than a dict hit, and a corpus has few distinct extensions, so caching by
+    // lowercased extension collapses 100k lookups to a handful. Value is the
+    // lowercased MIME (or nil when the extension has no UTType MIME).
+    private var _mimeTypeByExtension: [String: String?] = [:]
+    // Lazily computed content-duplication result (duplicate + examined sets).
+    // nil until the first contentdupe: use forces a (size-grouped) hash pass.
+    private var _contentDuplication: ContentDuplicationResult?
+
+    init(entries: [FileEntry], options: SearchOptions) {
+        self.entries = entries
+        self.options = options
+    }
+
+    /// Preferred MIME type for a (lowercased) extension, memoized. Pure function
+    /// of the extension, so caching is behavior-identical.
+    func mimeType(forExtension ext: String) -> String? {
+        if let cached = _mimeTypeByExtension[ext] {
+            return cached
+        }
+        let mime = UTType(filenameExtension: ext)?.preferredMIMEType?.lowercased()
+        _mimeTypeByExtension[ext] = mime
+        return mime
+    }
+
+    /// Whether an entry's file content is byte-identical to another indexed
+    /// file's. Computed lazily on first `contentdupe:` use (never at index time)
+    /// since it requires reading file bytes. Pure function of the entry set +
+    /// on-disk contents, so caching for the search's lifetime is safe.
+    func hasDuplicateContent(_ entry: FileEntry) -> Bool {
+        contentDuplication.duplicates.contains(entry.path)
+    }
+
+    /// True only when the file was actually examined (hashed, or content-unique
+    /// by virtue of a unique size) AND found not to duplicate another. Files
+    /// that were skipped — unreadable, over the size cap, or with no indexed
+    /// size — are NOT reported as unique, since they were never verified.
+    func hasUniqueContent(_ entry: FileEntry) -> Bool {
+        let result = contentDuplication
+        return result.examined.contains(entry.path) && !result.duplicates.contains(entry.path)
+    }
+
+    private var contentDuplication: ContentDuplicationResult {
+        if let cached = _contentDuplication {
+            return cached
+        }
+        let result = Self.computeContentDuplication(entries: entries)
+        _contentDuplication = result
+        return result
+    }
+
+    /// Identical content implies identical byte size, so only files whose size
+    /// collides with another need hashing — unique-size files are content-unique
+    /// for free. Files that cannot be hashed (unreadable, over the cap, no
+    /// indexed size, not a regular file) are left out of `examined` entirely so
+    /// they match neither `contentdupe:` nor `contentdupe:0`.
+    private static func computeContentDuplication(entries: [FileEntry]) -> ContentDuplicationResult {
+        let maxHashableBytes: Int64 = 100 * 1_024 * 1_024
+        var pathsBySize: [Int64: [String]] = [:]
+        for entry in entries where entry.kind == .file {
+            guard let size = entry.byteSize, size >= 0, size <= maxHashableBytes else {
+                continue
+            }
+            pathsBySize[size, default: []].append(entry.path)
+        }
+
+        var examined = Set<String>()
+        var hashCounts: [String: Int] = [:]
+        var hashByPath: [String: String] = [:]
+        for (_, paths) in pathsBySize {
+            if paths.count == 1 {
+                // Unique size ⟹ unique content, verified without hashing.
+                examined.insert(paths[0])
+                continue
+            }
+            for path in paths {
+                guard let hash = sha256Hex(ofFileAt: path) else {
+                    continue  // unreadable → not examined
+                }
+                examined.insert(path)
+                hashByPath[path] = hash
+                hashCounts[hash, default: 0] += 1
+            }
+        }
+
+        var duplicates = Set<String>()
+        for (path, hash) in hashByPath where (hashCounts[hash] ?? 0) > 1 {
+            duplicates.insert(path)
+        }
+        return ContentDuplicationResult(duplicates: duplicates, examined: examined)
+    }
+
+    private static func sha256Hex(ofFileAt path: String) -> String? {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path), options: .mappedIfSafe) else {
+            return nil
+        }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Ancestor folder chain for a normalized starting folder, memoized so the
+    /// many files under one directory don't each rebuild the same chain.
+    func ancestorChain(forFolder folder: String) -> [String] {
+        if let cached = _ancestorChainsByFolder[folder] {
+            return cached
+        }
+        let chain = SearchEngine.ancestorPathChain(fromFolder: folder)
+        _ancestorChainsByFolder[folder] = chain
+        return chain
+    }
+
+    private func buildNumericDuplicateCountsIfNeeded() {
+        guard !_numericDuplicateCountsBuilt else {
+            return
+        }
+        _byteSizeCounts = Dictionary(minimumCapacity: entries.count)
+        _createdAtCounts = Dictionary(minimumCapacity: entries.count)
+        _modifiedAtCounts = Dictionary(minimumCapacity: entries.count)
+        _accessedAtCounts = Dictionary(minimumCapacity: entries.count)
+        _attributeCounts = Dictionary(minimumCapacity: 16)
+        for entry in entries {
+            if let byteSize = entry.byteSize {
+                _byteSizeCounts[byteSize, default: 0] += 1
+            }
+            if let createdAt = entry.createdAt {
+                _createdAtCounts[createdAt.timeIntervalSince1970, default: 0] += 1
+            }
+            if let modifiedAt = entry.modifiedAt {
+                _modifiedAtCounts[modifiedAt.timeIntervalSince1970, default: 0] += 1
+            }
+            if let accessedAt = entry.accessedAt {
+                _accessedAtCounts[accessedAt.timeIntervalSince1970, default: 0] += 1
+            }
+            _attributeCounts[entry.attributes.rawValue, default: 0] += 1
+        }
+        _numericDuplicateCountsBuilt = true
+    }
+
+    var byteSizeCounts: [Int64: Int] {
+        buildNumericDuplicateCountsIfNeeded()
+        return _byteSizeCounts
+    }
+
+    var createdAtCounts: [TimeInterval: Int] {
+        buildNumericDuplicateCountsIfNeeded()
+        return _createdAtCounts
+    }
+
+    var modifiedAtCounts: [TimeInterval: Int] {
+        buildNumericDuplicateCountsIfNeeded()
+        return _modifiedAtCounts
+    }
+
+    var accessedAtCounts: [TimeInterval: Int] {
+        buildNumericDuplicateCountsIfNeeded()
+        return _accessedAtCounts
+    }
+
+    var attributeCounts: [Int: Int] {
+        buildNumericDuplicateCountsIfNeeded()
+        return _attributeCounts
+    }
+
+    var childrenByParentPath: [String: [FileEntry]] {
+        if let cached = _childrenByParentPath {
+            return cached
+        }
+        var children: [String: [FileEntry]] = Dictionary(minimumCapacity: entries.count / 4)
+        for entry in entries {
+            children[entry.parent, default: []].append(entry)
+        }
+        _childrenByParentPath = children
+        return children
+    }
+
+    var fileSystemIndexBySourceKey: [String: Int] {
+        if let cached = _fileSystemIndexBySourceKey {
+            return cached
+        }
+        var sourceKeys = Set<String>()
+        for entry in entries {
+            sourceKeys.insert(SearchContext.fileSystemSourceKey(for: entry))
+        }
+        let mapping = Dictionary(uniqueKeysWithValues: sourceKeys.sorted().enumerated().map { index, key in
+            (key, index)
+        })
+        _fileSystemIndexBySourceKey = mapping
+        return mapping
+    }
+
+    // Frequency tables used only by the duplicate/frequency operators. Built on
+    // first read with the same normalization the eager build used, so a typical
+    // dupe/freq query normalizes one field per entry instead of four, and
+    // queries that read none (e.g. childcount:, empty:) skip them entirely.
+    var normalizedNameCounts: [String: Int] {
+        if let cached = _normalizedNameCounts {
+            return cached
+        }
+        var counts: [String: Int] = Dictionary(minimumCapacity: entries.count)
+        for entry in entries {
+            counts[SearchEngine.normalize(entry.name, options: options), default: 0] += 1
+        }
+        _normalizedNameCounts = counts
+        return counts
+    }
+
+    var normalizedNamePartCounts: [String: Int] {
+        if let cached = _normalizedNamePartCounts {
+            return cached
+        }
+        var counts: [String: Int] = Dictionary(minimumCapacity: entries.count)
+        for entry in entries {
+            counts[SearchEngine.normalize(entry.namePart, options: options), default: 0] += 1
+        }
+        _normalizedNamePartCounts = counts
+        return counts
+    }
+
+    var normalizedExtensionCounts: [String: Int] {
+        if let cached = _normalizedExtensionCounts {
+            return cached
+        }
+        var counts: [String: Int] = Dictionary(minimumCapacity: 256)
+        for entry in entries where [.file, .symlink, .other].contains(entry.kind) {
+            counts[SearchEngine.normalize(entry.extensionName, options: options), default: 0] += 1
+        }
+        _normalizedExtensionCounts = counts
+        return counts
+    }
+
+    var normalizedPathPartCounts: [String: Int] {
+        if let cached = _normalizedPathPartCounts {
+            return cached
+        }
+        var counts: [String: Int] = Dictionary(minimumCapacity: entries.count / 4)
+        for entry in entries {
+            let normalized = SearchEngine.normalize(
+                SearchEngine.normalizedFolderPath(entry.parent),
+                options: options
+            )
+            counts[normalized, default: 0] += 1
+        }
+        _normalizedPathPartCounts = counts
+        return counts
+    }
+}
+
 private struct SearchContext {
     let entries: [FileEntry]
     private let normalizationCache: SearchNormalizationCache
     private let regexCache = SearchRegexCache()
-    let normalizedNameCounts: [String: Int]
-    let normalizedNamePartCounts: [String: Int]
-    let normalizedExtensionCounts: [String: Int]
-    let normalizedPathPartCounts: [String: Int]
-    let byteSizeCounts: [Int64: Int]
-    let createdAtCounts: [TimeInterval: Int]
-    let modifiedAtCounts: [TimeInterval: Int]
-    let accessedAtCounts: [TimeInterval: Int]
-    let attributeCounts: [Int: Int]
+    var normalizedNameCounts: [String: Int] { lazyIndexes.normalizedNameCounts }
+    var normalizedNamePartCounts: [String: Int] { lazyIndexes.normalizedNamePartCounts }
+    var normalizedExtensionCounts: [String: Int] { lazyIndexes.normalizedExtensionCounts }
+    var normalizedPathPartCounts: [String: Int] { lazyIndexes.normalizedPathPartCounts }
+    var byteSizeCounts: [Int64: Int] { lazyIndexes.byteSizeCounts }
+    var createdAtCounts: [TimeInterval: Int] { lazyIndexes.createdAtCounts }
+    var modifiedAtCounts: [TimeInterval: Int] { lazyIndexes.modifiedAtCounts }
+    var accessedAtCounts: [TimeInterval: Int] { lazyIndexes.accessedAtCounts }
+    var attributeCounts: [Int: Int] { lazyIndexes.attributeCounts }
     let childCountsByParentPath: [String: Int]
     let childFileCountsByParentPath: [String: Int]
     let childFolderCountsByParentPath: [String: Int]
-    let childrenByParentPath: [String: [FileEntry]]
+    private let lazyIndexes: SearchContextLazyIndexes
+    var childrenByParentPath: [String: [FileEntry]] { lazyIndexes.childrenByParentPath }
     let entriesByPath: [String: FileEntry]
-    let fileSystemIndexBySourceKey: [String: Int]
+    var fileSystemIndexBySourceKey: [String: Int] { lazyIndexes.fileSystemIndexBySourceKey }
 
     init(entries: [FileEntry], options: SearchOptions, buildFullIndexes: Bool = true) {
-        normalizationCache = SearchNormalizationCache(options: options, capacity: entries.count)
+        normalizationCache = SearchNormalizationCache(options: options)
 
         guard buildFullIndexes else {
             self.entries = entries
-            normalizedNameCounts = [:]
-            normalizedNamePartCounts = [:]
-            normalizedExtensionCounts = [:]
-            normalizedPathPartCounts = [:]
-            byteSizeCounts = [:]
-            createdAtCounts = [:]
-            modifiedAtCounts = [:]
-            accessedAtCounts = [:]
-            attributeCounts = [:]
             childCountsByParentPath = [:]
             childFileCountsByParentPath = [:]
             childFolderCountsByParentPath = [:]
-            childrenByParentPath = [:]
             entriesByPath = [:]
-            fileSystemIndexBySourceKey = [:]
+            // Lightweight context: no full-context predicate is present, so the
+            // lazy indexes are never read. Seed with no entries so the accessors
+            // return empty, matching the previous eager `[:]` behavior exactly.
+            lazyIndexes = SearchContextLazyIndexes(entries: [], options: options)
             return
         }
 
-        var nameCounts: [String: Int] = Dictionary(minimumCapacity: entries.count)
-        var namePartCounts: [String: Int] = Dictionary(minimumCapacity: entries.count)
-        var extensionCounts: [String: Int] = Dictionary(minimumCapacity: 256)
-        var pathPartCounts: [String: Int] = Dictionary(minimumCapacity: entries.count / 4)
-        var sizeCounts: [Int64: Int] = Dictionary(minimumCapacity: entries.count)
-        var createdCounts: [TimeInterval: Int] = Dictionary(minimumCapacity: entries.count)
-        var modifiedCounts: [TimeInterval: Int] = Dictionary(minimumCapacity: entries.count)
-        var accessedCounts: [TimeInterval: Int] = Dictionary(minimumCapacity: entries.count)
-        var attributes: [Int: Int] = Dictionary(minimumCapacity: 16)
         var childCounts: [String: Int] = Dictionary(minimumCapacity: entries.count / 4)
         var childFileCounts: [String: Int] = Dictionary(minimumCapacity: entries.count / 4)
         var childFolderCounts: [String: Int] = Dictionary(minimumCapacity: entries.count / 8)
-        var children: [String: [FileEntry]] = Dictionary(minimumCapacity: entries.count / 4)
         var entriesByPath: [String: FileEntry] = Dictionary(minimumCapacity: entries.count)
-        var sourceKeys = Set<String>()
 
         for entry in entries {
             entriesByPath[SearchEngine.normalizedFolderPath(entry.path)] = entry
-            sourceKeys.insert(Self.fileSystemSourceKey(for: entry))
-            let normalizedName = SearchEngine.normalize(entry.name, options: options)
-            nameCounts[normalizedName, default: 0] += 1
-            let normalizedNamePart = SearchEngine.normalize(entry.namePart, options: options)
-            namePartCounts[normalizedNamePart, default: 0] += 1
-            if [.file, .symlink, .other].contains(entry.kind) {
-                let normalizedExtension = SearchEngine.normalize(entry.extensionName, options: options)
-                extensionCounts[normalizedExtension, default: 0] += 1
-            }
-            let normalizedPathPart = SearchEngine.normalize(
-                SearchEngine.normalizedFolderPath(entry.parent),
-                options: options
-            )
-            pathPartCounts[normalizedPathPart, default: 0] += 1
-            if let byteSize = entry.byteSize {
-                sizeCounts[byteSize, default: 0] += 1
-            }
-            if let createdAt = entry.createdAt {
-                createdCounts[createdAt.timeIntervalSince1970, default: 0] += 1
-            }
-            if let modifiedAt = entry.modifiedAt {
-                modifiedCounts[modifiedAt.timeIntervalSince1970, default: 0] += 1
-            }
-            if let accessedAt = entry.accessedAt {
-                accessedCounts[accessedAt.timeIntervalSince1970, default: 0] += 1
-            }
-            attributes[entry.attributes.rawValue, default: 0] += 1
             childCounts[entry.parent, default: 0] += 1
             switch entry.kind {
             case .file, .symlink, .other:
@@ -3401,27 +3914,18 @@ private struct SearchContext {
             case .folder, .package:
                 childFolderCounts[entry.parent, default: 0] += 1
             }
-            children[entry.parent, default: []].append(entry)
         }
 
         self.entries = entries
-        normalizedNameCounts = nameCounts
-        normalizedNamePartCounts = namePartCounts
-        normalizedExtensionCounts = extensionCounts
-        normalizedPathPartCounts = pathPartCounts
-        byteSizeCounts = sizeCounts
-        createdAtCounts = createdCounts
-        modifiedAtCounts = modifiedCounts
-        accessedAtCounts = accessedCounts
-        attributeCounts = attributes
         childCountsByParentPath = childCounts
         childFileCountsByParentPath = childFileCounts
         childFolderCountsByParentPath = childFolderCounts
-        childrenByParentPath = children
         self.entriesByPath = entriesByPath
-        fileSystemIndexBySourceKey = Dictionary(uniqueKeysWithValues: sourceKeys.sorted().enumerated().map { index, key in
-            (key, index)
-        })
+        // The numeric duplicate-frequency tables, normalized frequency tables,
+        // childrenByParentPath and fileSystemIndexBySourceKey are all built
+        // lazily on first access — most full-context predicates read only a
+        // subset (or none) of them.
+        lazyIndexes = SearchContextLazyIndexes(entries: entries, options: options)
     }
 
     func fileSystemIndex(for entry: FileEntry) -> Int? {
@@ -3448,7 +3952,7 @@ private struct SearchContext {
         regexCache.regex(pattern: pattern, caseSensitive: caseSensitive)
     }
 
-    private static func fileSystemSourceKey(for entry: FileEntry) -> String {
+    fileprivate static func fileSystemSourceKey(for entry: FileEntry) -> String {
         if let fileListPath = entry.fileListPath, !fileListPath.isEmpty {
             return "filelist:\(fileListPath)"
         }
@@ -3560,6 +4064,22 @@ private struct SearchContext {
         childrenByParentPath[parentPath] ?? []
     }
 
+    func ancestorChain(forFolder folder: String) -> [String] {
+        lazyIndexes.ancestorChain(forFolder: folder)
+    }
+
+    func mimeType(forExtension ext: String) -> String? {
+        lazyIndexes.mimeType(forExtension: ext)
+    }
+
+    func hasDuplicateContent(_ entry: FileEntry) -> Bool {
+        lazyIndexes.hasDuplicateContent(entry)
+    }
+
+    func hasUniqueContent(_ entry: FileEntry) -> Bool {
+        lazyIndexes.hasUniqueContent(entry)
+    }
+
     func descendants(for entry: FileEntry, allowedKinds: Set<FileKind>? = nil) -> [FileEntry] {
         var descendants: [FileEntry] = []
         var stack = children(for: entry)
@@ -3601,7 +4121,7 @@ private struct SearchContext {
             guard current != "/" else {
                 break
             }
-            current = SearchEngine.normalizedFolderPath(URL(fileURLWithPath: current).deletingLastPathComponent().path)
+            current = SearchEngine.normalizedFolderPath(SearchEngine.parentDirectoryPath(of: current))
         }
 
         return ancestors
@@ -3642,16 +4162,16 @@ private struct SearchContext {
 
 private final class SearchNormalizationCache {
     private let options: SearchOptions
+    // Only literal (query-value) normalization is cached: a query term is
+    // constant across all entries, so the cache is reused N times for one key.
+    // Per-entry name/namePart/path normalization is NOT cached — the ASCII
+    // fast path in SearchEngine.normalize made folding cheap enough that hashing
+    // the long path key (lookup + insert per entry) costs ~2x more than just
+    // re-normalizing, and each is normalized only a handful of times per search.
     private var normalizedLiterals: [String: String] = [:]
-    private var normalizedNamesByPath: [String: String] = [:]
-    private var normalizedNamePartsByPath: [String: String] = [:]
-    private var normalizedPathsByPath: [String: String] = [:]
 
-    init(options: SearchOptions, capacity: Int) {
+    init(options: SearchOptions) {
         self.options = options
-        normalizedNamesByPath.reserveCapacity(min(capacity, 65_536))
-        normalizedNamePartsByPath.reserveCapacity(min(capacity, 65_536))
-        normalizedPathsByPath.reserveCapacity(min(capacity, 65_536))
     }
 
     func normalizedLiteral(_ value: String, options: SearchOptions) -> String {
@@ -3668,42 +4188,15 @@ private final class SearchNormalizationCache {
     }
 
     func normalizedName(for entry: FileEntry, options: SearchOptions) -> String {
-        guard options == self.options else {
-            return SearchEngine.normalize(entry.name, options: options)
-        }
-        if let cached = normalizedNamesByPath[entry.path] {
-            return cached
-        }
-
-        let normalized = SearchEngine.normalize(entry.name, options: options)
-        normalizedNamesByPath[entry.path] = normalized
-        return normalized
+        SearchEngine.normalize(entry.name, options: options)
     }
 
     func normalizedNamePart(for entry: FileEntry, options: SearchOptions) -> String {
-        guard options == self.options else {
-            return SearchEngine.normalize(entry.namePart, options: options)
-        }
-        if let cached = normalizedNamePartsByPath[entry.path] {
-            return cached
-        }
-
-        let normalized = SearchEngine.normalize(entry.namePart, options: options)
-        normalizedNamePartsByPath[entry.path] = normalized
-        return normalized
+        SearchEngine.normalize(entry.namePart, options: options)
     }
 
     func normalizedPath(for entry: FileEntry, options: SearchOptions) -> String {
-        guard options == self.options else {
-            return SearchEngine.normalize(entry.path, options: options)
-        }
-        if let cached = normalizedPathsByPath[entry.path] {
-            return cached
-        }
-
-        let normalized = SearchEngine.normalize(entry.path, options: options)
-        normalizedPathsByPath[entry.path] = normalized
-        return normalized
+        SearchEngine.normalize(entry.path, options: options)
     }
 }
 
@@ -3929,6 +4422,7 @@ private indirect enum SearchPredicate {
     case fileSystemIndex(ComparisonFilter<Int>)
     case pathList(Set<String>)
     case extensionList(Set<String>)
+    case mime(String)
     case noExtension
     case path(String)
     case fullPath(String)
@@ -3963,6 +4457,10 @@ private indirect enum SearchPredicate {
     case dateRun(DateFilter)
     case recentChange(DateFilter)
     case runCount(ComparisonFilter<Int>)
+    case linkCount(ComparisonFilter<Int>)
+    case permission(PermissionFilter)
+    case ownerUID(UInt32)
+    case ownerGID(UInt32)
     case depth(ComparisonFilter<Int>)
     case characterCount(ComparisonFilter<Int>)
     case nameLength(ComparisonFilter<Int>)
@@ -4026,6 +4524,8 @@ private indirect enum SearchPredicate {
     case uniqueAccessedDate
     case duplicateAttributes
     case uniqueAttributes
+    case duplicateContent
+    case uniqueContent
     case category(FileCategory)
     case attributes(AttributeFilter)
     case content(String, ContentEncoding?)
@@ -4085,6 +4585,7 @@ private indirect enum SearchPredicate {
              .duplicateModifiedDate, .uniqueModifiedDate,
              .duplicateAccessedDate, .uniqueAccessedDate,
              .duplicateAttributes, .uniqueAttributes,
+             .duplicateContent, .uniqueContent,
              .formula:
             return true
         default:
@@ -4134,6 +4635,8 @@ private indirect enum SearchPredicate {
             return pathListScore(values: values, entry: entry, options: options)
         case let .extensionList(extensions):
             return extensions.contains(entry.extensionName.lowercased()) ? 2 : nil
+        case let .mime(pattern):
+            return mimeScore(pattern: pattern, entry: entry, context: context) ? 2 : nil
         case .noExtension:
             return [.file, .symlink, .other].contains(entry.kind) && entry.extensionName.isEmpty ? 2 : nil
         case let .path(value):
@@ -4212,9 +4715,9 @@ private indirect enum SearchPredicate {
             }
             return filter.matches(byteSize) ? 1 : nil
         case let .ancestor(value):
-            return ancestorScore(value: value, entry: entry, options: options)
+            return ancestorScore(value: value, entry: entry, options: options, context: context)
         case let .ancestorName(value):
-            return ancestorNameScore(value: value, entry: entry, options: options)
+            return ancestorNameScore(value: value, entry: entry, options: options, context: context)
         case let .shellFolder(path):
             return shellFolderScore(path: path, entry: entry, options: options)
         case let .kind(kinds):
@@ -4238,6 +4741,27 @@ private indirect enum SearchPredicate {
             return filter.matches(entry.indexedAt) ? 1 : nil
         case let .runCount(filter):
             return filter.matches(entry.runCountValue) ? 1 : nil
+        case let .linkCount(filter):
+            guard [.file, .symlink, .other].contains(entry.kind),
+                  let links = SearchEngine.hardLinkCount(ofFileAt: entry.path) else {
+                return nil
+            }
+            return filter.matches(links) ? 1 : nil
+        case let .permission(filter):
+            guard let bits = SearchEngine.permissionBits(ofFileAt: entry.path) else {
+                return nil
+            }
+            return filter.matches(bits) ? 1 : nil
+        case let .ownerUID(uid):
+            guard let ids = SearchEngine.ownerIDs(ofFileAt: entry.path) else {
+                return nil
+            }
+            return ids.uid == uid ? 1 : nil
+        case let .ownerGID(gid):
+            guard let ids = SearchEngine.ownerIDs(ofFileAt: entry.path) else {
+                return nil
+            }
+            return ids.gid == gid ? 1 : nil
         case let .depth(filter):
             return filter.matches(entry.depth) ? 1 : nil
         case let .characterCount(filter):
@@ -4400,6 +4924,10 @@ private indirect enum SearchPredicate {
             return context.hasDuplicateAttributes(entry) ? 1 : nil
         case .uniqueAttributes:
             return context.hasDuplicateAttributes(entry) ? nil : 1
+        case .duplicateContent:
+            return context.hasDuplicateContent(entry) ? 1 : nil
+        case .uniqueContent:
+            return context.hasUniqueContent(entry) ? 1 : nil
         case let .category(category):
             return category.matches(entry) ? 2 : nil
         case let .attributes(filter):
@@ -4515,7 +5043,7 @@ private indirect enum SearchPredicate {
             return 2
         }
 
-        let candidates = [fileListName, fileListPath, URL(fileURLWithPath: fileListPath).lastPathComponent]
+        let candidates = [fileListName, fileListPath, SearchEngine.lastPathComponent(of: fileListPath)]
         for rawValue in values {
             let value = substituteSearchValue(rawValue, entry: entry)
             let usesPath = value.contains("/") || value.contains("\\")
@@ -4714,7 +5242,7 @@ private indirect enum SearchPredicate {
 
         var result = value
         let parentPath = SearchEngine.normalizedFolderPath(entry.parent)
-        let parentName = parentPath == "/" ? "/" : URL(fileURLWithPath: parentPath).lastPathComponent
+        let parentName = parentPath == "/" ? "/" : SearchEngine.lastPathComponent(of: parentPath)
         let normalizedPath = SearchEngine.normalizedFolderPath(entry.path)
         let byteSize = entry.byteSize.map(String.init) ?? ""
         let nameLength = String(entry.name.utf16.count)
@@ -4834,7 +5362,7 @@ private indirect enum SearchPredicate {
                 SearchEngine.normalize(normalizedValue, options: options) ? 8 : nil
         }
 
-        let parentName = URL(fileURLWithPath: parentPath).lastPathComponent
+        let parentName = SearchEngine.lastPathComponent(of: parentPath)
         return contains(normalizedValue, in: parentName, options: options) ? 8 : nil
     }
 
@@ -4931,7 +5459,7 @@ private indirect enum SearchPredicate {
         }
 
         let parentPath = SearchEngine.normalizedFolderPath(entry.parent)
-        let parentName = parentPath == "/" ? "/" : URL(fileURLWithPath: parentPath).lastPathComponent
+        let parentName = parentPath == "/" ? "/" : SearchEngine.lastPathComponent(of: parentPath)
         return contains(normalizedValue, in: parentName, options: options) ? 8 : nil
     }
 
@@ -4946,41 +5474,42 @@ private indirect enum SearchPredicate {
         return contains(normalizedValue, in: parentPath, options: options) ? 8 : nil
     }
 
-    private func ancestorScore(value: String, entry: FileEntry, options: SearchOptions) -> Int? {
+    private func ancestorScore(value: String, entry: FileEntry, options: SearchOptions, context: SearchContext) -> Int? {
         let resolvedValue = substituteSearchValue(value, entry: entry)
         let normalizedValue = SearchEngine.normalizedFolderPath(resolvedValue)
         guard !normalizedValue.isEmpty else {
             return 0
         }
 
-        let ancestors = ancestorPaths(for: entry)
+        let ancestors = ancestorPaths(for: entry, context: context)
         guard !ancestors.isEmpty else {
             return nil
         }
 
+        let normalizedNeedle = SearchEngine.normalize(normalizedValue, options: options)
         if SearchEngine.isAbsoluteSearchPath(normalizedValue) {
-            let normalizedNeedle = SearchEngine.normalize(normalizedValue, options: options)
             return ancestors.contains { ancestor in
                 SearchEngine.normalize(ancestor, options: options) == normalizedNeedle
             } ? 8 : nil
         }
 
         return ancestors.contains { ancestor in
-            let ancestorName = ancestor == "/" ? "/" : URL(fileURLWithPath: ancestor).lastPathComponent
-            return contains(normalizedValue, in: ancestorName, options: options)
+            let ancestorName = ancestor == "/" ? "/" : SearchEngine.lastPathComponent(of: ancestor)
+            return containsNormalizedNeedle(normalizedNeedle, in: ancestorName, options: options)
         } ? 8 : nil
     }
 
-    private func ancestorNameScore(value: String, entry: FileEntry, options: SearchOptions) -> Int? {
+    private func ancestorNameScore(value: String, entry: FileEntry, options: SearchOptions, context: SearchContext) -> Int? {
         let resolvedValue = substituteSearchValue(value, entry: entry)
         let normalizedValue = SearchEngine.normalizedFolderPath(resolvedValue)
         guard !normalizedValue.isEmpty else {
             return 0
         }
 
-        return ancestorPaths(for: entry).contains { ancestor in
-            let ancestorName = ancestor == "/" ? "/" : URL(fileURLWithPath: ancestor).lastPathComponent
-            return contains(normalizedValue, in: ancestorName, options: options)
+        let normalizedNeedle = SearchEngine.normalize(normalizedValue, options: options)
+        return ancestorPaths(for: entry, context: context).contains { ancestor in
+            let ancestorName = ancestor == "/" ? "/" : SearchEngine.lastPathComponent(of: ancestor)
+            return containsNormalizedNeedle(normalizedNeedle, in: ancestorName, options: options)
         } ? 8 : nil
     }
 
@@ -5002,29 +5531,8 @@ private indirect enum SearchPredicate {
         return parentPath.hasPrefix(prefix) ? 8 : nil
     }
 
-    private func ancestorPaths(for entry: FileEntry) -> [String] {
-        var paths: [String] = []
-        var current = SearchEngine.normalizedFolderPath(entry.parent)
-        var seen = Set<String>()
-
-        while !current.isEmpty, !seen.contains(current) {
-            paths.append(current)
-            seen.insert(current)
-
-            guard current != "/" else {
-                break
-            }
-
-            let parent = SearchEngine.normalizedFolderPath(
-                URL(fileURLWithPath: current).deletingLastPathComponent().path
-            )
-            guard parent != current else {
-                break
-            }
-            current = parent
-        }
-
-        return paths
+    private func ancestorPaths(for entry: FileEntry, context: SearchContext) -> [String] {
+        context.ancestorChain(forFolder: SearchEngine.normalizedFolderPath(entry.parent))
     }
 
     private func wildcardScore(
@@ -5066,6 +5574,34 @@ private indirect enum SearchPredicate {
             }
         }
         return nil
+    }
+
+    /// Matches an entry's extension-derived MIME type against a pattern.
+    /// Patterns: exact (`text/plain`), subtype wildcard (`image/*`), or
+    /// match-any (`*` / `*/*`). The MIME type is derived from the extension via
+    /// UTType at query time, so no schema/index changes are needed.
+    private func mimeScore(pattern: String, entry: FileEntry, context: SearchContext) -> Bool {
+        guard [.file, .symlink, .other].contains(entry.kind) else {
+            return false
+        }
+        let normalizedPattern = pattern.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedPattern.isEmpty else {
+            return false
+        }
+        let ext = entry.extensionName.lowercased()
+        guard !ext.isEmpty,
+              let mimeType = context.mimeType(forExtension: ext) else {
+            return false
+        }
+
+        if normalizedPattern == "*" || normalizedPattern == "*/*" {
+            return true
+        }
+        if normalizedPattern.hasSuffix("/*") {
+            // "image/*" matches any subtype with that primary type.
+            return mimeType.hasPrefix(String(normalizedPattern.dropLast(1)))
+        }
+        return mimeType == normalizedPattern
     }
 
     private func contentScore(
@@ -5336,7 +5872,7 @@ private indirect enum SearchPredicate {
         context: SearchContext
     ) -> Int? {
         let resolvedValue = substituteSearchValue(value, entry: entry)
-        for ancestor in ancestorPaths(for: entry) {
+        for ancestor in ancestorPaths(for: entry, context: context) {
             let children = context.children(parentPath: ancestor).filter { child in
                 guard let allowedKinds else {
                     return true
@@ -5470,7 +6006,7 @@ private indirect enum SearchPredicate {
         context: SearchContext
     ) -> Int? {
         let resolvedValue = substituteSearchValue(value, entry: entry)
-        for ancestor in ancestorPaths(for: entry) {
+        for ancestor in ancestorPaths(for: entry, context: context) {
             if siblingOfPathScore(
                 path: ancestor,
                 value: resolvedValue,
@@ -5524,7 +6060,7 @@ private indirect enum SearchPredicate {
         guard path != "/" else {
             return "/"
         }
-        return SearchEngine.normalizedFolderPath(URL(fileURLWithPath: path).deletingLastPathComponent().path)
+        return SearchEngine.normalizedFolderPath(SearchEngine.parentDirectoryPath(of: path))
     }
 
     private func childMatches(value: String, child: FileEntry, options: SearchOptions) -> Bool {
@@ -5557,7 +6093,7 @@ private indirect enum SearchPredicate {
         guard !options.diacriticSensitive else {
             return pattern
         }
-        return pattern.folding(options: [.diacriticInsensitive], locale: .current)
+        return SearchEngine.diacriticFolded(pattern)
     }
 
     private func regexCandidates(entry: FileEntry, options: SearchOptions) -> [String] {
@@ -5565,7 +6101,7 @@ private indirect enum SearchPredicate {
         guard !options.diacriticSensitive else {
             return candidates
         }
-        return candidates.map { $0.folding(options: [.diacriticInsensitive], locale: .current) }
+        return candidates.map(SearchEngine.diacriticFolded)
     }
 
     private func shouldSearchPath(_ query: String, options: SearchOptions) -> Bool {
@@ -5585,7 +6121,21 @@ private indirect enum SearchPredicate {
     }
 
     private func contains(_ needle: String, in haystack: String, options: SearchOptions) -> Bool {
-        let normalizedNeedle = SearchEngine.normalize(needle, options: options)
+        containsNormalizedNeedle(
+            SearchEngine.normalize(needle, options: options),
+            in: haystack,
+            options: options
+        )
+    }
+
+    /// Like `contains`, but takes an already-normalized needle so a constant
+    /// needle can be normalized once and reused across a per-entry loop (e.g.
+    /// ancestor matching) instead of re-normalizing it for every candidate.
+    private func containsNormalizedNeedle(
+        _ normalizedNeedle: String,
+        in haystack: String,
+        options: SearchOptions
+    ) -> Bool {
         let normalizedHaystack = SearchEngine.normalize(haystack, options: options)
         if options.wholeWordMatching {
             return containsWholeWord(normalizedNeedle, in: normalizedHaystack)
@@ -6191,7 +6741,7 @@ private indirect enum FormulaValueExpression {
             return .string(SearchEngine.normalizedFolderPath(entry.parent))
         case "parentname":
             let parentPath = SearchEngine.normalizedFolderPath(entry.parent)
-            return .string(parentPath == "/" ? "/" : URL(fileURLWithPath: parentPath).lastPathComponent)
+            return .string(parentPath == "/" ? "/" : SearchEngine.lastPathComponent(of: parentPath))
         case "size", "filesize":
             guard let byteSize = entry.byteSize else {
                 return nil
@@ -7096,6 +7646,7 @@ private enum SearchQueryParser {
              "dc", "datecreated", "datecreateddate", "da", "dateaccessed",
              "dateaccesseddate", "dr", "daterun", "rc", "recentchange",
              "runcount", "runs", "track", "year", "fsi", "namefrequency", "extensionfrequency",
+             "linkcount", "links", "hardlinks", "hardlinkcount", "nlink",
              "depth", "parents", "parentcount", "chars", "len", "length", "namelen",
              "namelength", "basenamelen", "basenamelength",
              "filenamelen", "filenamelength", "fullpathlen", "fullpathlength",
@@ -7318,6 +7869,30 @@ private enum SearchQueryParser {
                 return (finalize(.never(token), state: state), ["Could not parse \(token)"])
             }
             predicate = .runCount(filter)
+            warnings = []
+        case "linkcount", "links", "hardlinks", "hardlinkcount", "nlink":
+            guard let filter = ComparisonFilter<Int>.parse(value, valueParser: { Int($0) }) else {
+                return (finalize(.never(token), state: state), ["Could not parse \(token)"])
+            }
+            predicate = .linkCount(filter)
+            warnings = []
+        case "perm", "perms", "permission", "permissions", "mode":
+            guard let filter = PermissionFilter.parse(value) else {
+                return (finalize(.never(token), state: state), ["Could not parse \(token)"])
+            }
+            predicate = .permission(filter)
+            warnings = []
+        case "owner", "user", "uid", "ownername", "username":
+            guard let uid = SearchEngine.resolveUserID(value) else {
+                return (finalize(.never(token), state: state), ["Could not parse \(token)"])
+            }
+            predicate = .ownerUID(uid)
+            warnings = []
+        case "group", "gid", "groupname":
+            guard let gid = SearchEngine.resolveGroupID(value) else {
+                return (finalize(.never(token), state: state), ["Could not parse \(token)"])
+            }
+            predicate = .ownerGID(gid)
             warnings = []
         case "namefrequency":
             guard let filter = ComparisonFilter<Int>.parse(value.isEmpty ? ">0" : value, valueParser: { Int($0) }) else {
@@ -7799,6 +8374,9 @@ private enum SearchQueryParser {
         case "attribdupe", "attrdupe":
             let parsed = parseBooleanPredicate(value, truePredicate: .duplicateAttributes, falsePredicate: .uniqueAttributes)
             return (finalize(parsed.predicate, state: state), parsed.warnings)
+        case "contentdupe", "contentdupes", "dupecontent", "duplicatecontent":
+            let parsed = parseBooleanPredicate(value, truePredicate: .duplicateContent, falsePredicate: .uniqueContent)
+            return (finalize(parsed.predicate, state: state), parsed.warnings)
         case "type", "kind", "category":
             guard let category = FileCategory.parse(value) else {
                 return (finalize(.never(token), state: state), ["Could not parse \(token)"])
@@ -7858,6 +8436,9 @@ private enum SearchQueryParser {
             warnings = []
         case "utf16becontent":
             predicate = value.isEmpty ? .always : .content(value, .utf16BigEndian)
+            warnings = []
+        case "mime", "mimetype", "mime-type", "contenttype", "content-type":
+            predicate = value.isEmpty ? .always : .mime(value)
             warnings = []
         default:
             predicate = plainPredicate(token, state: state)
@@ -8387,6 +8968,59 @@ private enum FileCategory {
             }
             return entry.kind == .file && Self.executableExtensions.contains(entry.extensionName.lowercased())
         }
+    }
+}
+
+private struct PermissionFilter {
+    enum Mode {
+        case exact      // perm:644  → (mode & 07777) == mask
+        case allBits    // perm:-002 → (mode & mask) == mask  (find -perm -MODE)
+        case anyBits    // perm:/111 → (mode & mask) != 0      (find -perm /MODE)
+    }
+
+    let mode: Mode
+    let mask: UInt16  // 12 significant bits: setuid/setgid/sticky + rwx triplets
+
+    func matches(_ rawMode: UInt16) -> Bool {
+        let bits = rawMode & 0o7777
+        switch mode {
+        case .exact:
+            return bits == mask
+        case .allBits:
+            // mask == 0 matches nothing (intentional: `find -perm -000` matches
+            // everything, but a "-0" query is almost certainly a mistake, so we
+            // treat a degenerate empty mask as "no constraint satisfiable").
+            return mask == 0 ? false : (bits & mask) == mask
+        case .anyBits:
+            return mask == 0 ? false : (bits & mask) != 0
+        }
+    }
+
+    /// Parses `644`, `-002` (all listed bits set), or `/111` (any listed bit
+    /// set), mirroring `find -perm`. The numeric part is octal, 0–07777.
+    static func parse(_ rawValue: String) -> PermissionFilter? {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+        let mode: Mode
+        var digits = Substring(trimmed)
+        if let first = trimmed.first, first == "-" {
+            mode = .allBits
+            digits = trimmed.dropFirst()
+        } else if let first = trimmed.first, first == "/" {
+            mode = .anyBits
+            digits = trimmed.dropFirst()
+        } else {
+            mode = .exact
+        }
+        guard !digits.isEmpty,
+              digits.allSatisfy({ $0 >= "0" && $0 <= "7" }),
+              let value = UInt16(digits, radix: 8),
+              value <= 0o7777 else {
+            return nil
+        }
+        return PermissionFilter(mode: mode, mask: value)
     }
 }
 

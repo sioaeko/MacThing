@@ -237,14 +237,20 @@ public struct FileEntry: Codable, Hashable, Identifiable, Sendable {
         guard !parent.isEmpty, parent != "/" else {
             return 0
         }
+        // Count non-empty path components without allocating an array.
+        // Equivalent to `parent.split(separator: "/").count`, and robust to
+        // leading, trailing, and doubled slashes.
         var count = 0
+        var previousWasSlash = true
         for c in parent.utf8 {
             if c == UInt8(ascii: "/") {
-                count += 1
+                previousWasSlash = true
+            } else {
+                if previousWasSlash { count += 1 }
+                previousWasSlash = false
             }
         }
-        // Leading slash doesn't count as a depth level
-        return parent.first == "/" ? count - 1 : count
+        return count
     }
 
     public var runCountValue: Int {

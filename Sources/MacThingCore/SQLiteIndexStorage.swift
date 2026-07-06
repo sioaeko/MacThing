@@ -233,6 +233,13 @@ private final class SQLiteDatabase {
         try execute("CREATE INDEX IF NOT EXISTS entries_file_list_source_idx ON entries(file_list_name, file_list_path);")
         try execute("CREATE INDEX IF NOT EXISTS entries_media_track_idx ON entries(media_track);")
         try execute("CREATE INDEX IF NOT EXISTS entries_media_year_idx ON entries(media_year);")
+        // Composite covering index for the child-count / total-child-size
+        // subqueries (WHERE parent = ? AND kind IN (...)). Lets SQLite answer
+        // them straight from the index without touching the table.
+        try execute("CREATE INDEX IF NOT EXISTS entries_parent_kind_idx ON entries(parent, kind);")
+        // Composite index matching the default browse ordering, so the
+        // window/candidate queries avoid a TEMP B-TREE sort.
+        try execute("CREATE INDEX IF NOT EXISTS entries_modified_name_idx ON entries(modified_at DESC, name ASC);")
         try execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
                 path UNINDEXED,
@@ -254,6 +261,12 @@ private final class SQLiteDatabase {
     private func configureConnection() throws {
         try execute("PRAGMA synchronous=NORMAL;")
         try execute("PRAGMA temp_store=MEMORY;")
+        // Larger page cache (~16 MB; negative = KiB) keeps hot index pages
+        // resident, cutting I/O on the interactive search read path.
+        try execute("PRAGMA cache_size=-16000;")
+        // Memory-mapped I/O (256 MB) lets SQLite read pages without syscalls,
+        // which speeds up the large sequential index scans during search.
+        try execute("PRAGMA mmap_size=268435456;")
     }
 
     private func hasCoreSchemaTables() throws -> Bool {
@@ -286,14 +299,21 @@ private final class SQLiteDatabase {
     }
 
     private func derivedLengthValues(path: String, name: String, parent: String) -> DerivedLengthValues {
-        let exactExtensionName = URL(fileURLWithPath: path).pathExtension
-        let extensionName = exactExtensionName.lowercased()
+        // Derive the extension and name-part with the same logic as
+        // FileEntry.extensionName / FileEntry.namePart (the query-time path),
+        // avoiding a per-entry URL allocation. Using the same algorithm also
+        // keeps these persisted columns consistent with query-time matching
+        // (e.g. a file like "..dots" now both indexes and matches as ext "dots").
+        let exactExtensionName: String
         let exactNamePart: String
-        if !exactExtensionName.isEmpty, name.count > exactExtensionName.count + 1 {
-            exactNamePart = String(name.dropLast(exactExtensionName.count + 1))
+        if let dotIndex = name.lastIndex(of: "."), dotIndex != name.startIndex {
+            exactExtensionName = String(name[name.index(after: dotIndex)...])
+            exactNamePart = String(name[..<dotIndex])
         } else {
+            exactExtensionName = ""
             exactNamePart = name
         }
+        let extensionName = exactExtensionName.lowercased()
         let exactPathPart = SearchEngine.normalizedFolderPath(parent)
 
         return DerivedLengthValues(
@@ -412,10 +432,37 @@ private final class SQLiteDatabase {
         try transaction {
             try setMetaValue(snapshot.rootPath, forKey: "rootPath")
             try setMetaValue(String(snapshot.createdAt.timeIntervalSince1970), forKey: "updatedAt")
+
+            // Bulk-load pattern: drop the secondary indexes on `entries`, load all
+            // rows into the unindexed table, then recreate each index in one pass
+            // (one sort per index instead of 25+ per-row b-tree updates). The
+            // index set is captured from sqlite_master at runtime — not a
+            // hardcoded list — so new schema indexes are preserved automatically;
+            // each is recreated from its exact original DDL (collation, order,
+            // composite columns all intact). All within the transaction, so any
+            // failure rolls back to the fully-indexed original state.
+            let savedIndexes: [(name: String, sql: String)] = try query(
+                """
+                SELECT name, sql FROM sqlite_master
+                WHERE type = 'index' AND tbl_name = 'entries' AND sql IS NOT NULL;
+                """
+            ) { statement in
+                (statement.text(at: 0) ?? "", statement.text(at: 1) ?? "")
+            }.filter { !$0.name.isEmpty && !$0.sql.isEmpty }
+
             try execute("DELETE FROM entries;")
             try execute("DELETE FROM entries_fts;")
             try execute("DELETE FROM entries_trigram;")
-            try insert(entries: snapshot.entries)
+
+            for index in savedIndexes {
+                try execute("DROP INDEX IF EXISTS \"\(index.name)\";")
+            }
+
+            try insert(entries: snapshot.entries, bulkRebuildSearchIndexes: true)
+
+            for index in savedIndexes {
+                try execute(index.sql)
+            }
         }
     }
 
@@ -491,10 +538,10 @@ private final class SQLiteDatabase {
                    media_comment, media_genre, media_track, media_year
             FROM entries
             ORDER BY modified_at DESC, name ASC
-            LIMIT \(safeLimit) OFFSET \(safeOffset);
+            LIMIT ? OFFSET ?;
             """
 
-        return try query(sql) { statement in
+        return try query(sql, bindings: [.int(Int64(safeLimit)), .int(Int64(safeOffset))]) { statement in
             self.entry(from: statement)
         }
     }
@@ -578,10 +625,10 @@ private final class SQLiteDatabase {
             JOIN entries ON entries.path = entries_fts.path
             WHERE entries_fts MATCH ?
             \(filterClause)
-            LIMIT \(limit);
+            LIMIT ?;
             """
 
-        return try query(sql, bindings: [.text(matchQuery)] + filter.bindings) { statement in
+        return try query(sql, bindings: [.text(matchQuery)] + filter.bindings + [.int(Int64(limit))]) { statement in
             self.entry(from: statement)
         }
     }
@@ -607,10 +654,10 @@ private final class SQLiteDatabase {
             WHERE entries_trigram MATCH ?
             \(filterClause)
             ORDER BY entries.modified_at DESC, entries.name ASC
-            LIMIT \(limit);
+            LIMIT ?;
             """
 
-        return try query(sql, bindings: [.text(matchQuery)] + filter.bindings) { statement in
+        return try query(sql, bindings: [.text(matchQuery)] + filter.bindings + [.int(Int64(limit))]) { statement in
             self.entry(from: statement)
         }
     }
@@ -651,12 +698,12 @@ private final class SQLiteDatabase {
             FROM entries
             WHERE \(clauses.joined(separator: " AND "))
             ORDER BY modified_at DESC, name ASC
-            LIMIT \(limit);
+            LIMIT ?;
             """
         let bindings = hint.terms.flatMap { term -> [SQLiteValue] in
             let like = "%\(escapeLike(term))%"
             return Array(repeating: .text(like), count: columns.count)
-        } + filter.bindings
+        } + filter.bindings + [.int(Int64(limit))]
 
         return try query(sql, bindings: bindings) { statement in
             self.entry(from: statement)
@@ -1000,27 +1047,38 @@ private final class SQLiteDatabase {
         var targetClauses: [String] = []
         var bindings: [SQLiteValue] = []
 
-        if let pathValue = filter.pathValue {
-            targetClauses.append("target.path = ?")
-            bindings.append(.text(pathValue))
-        } else if let relativeName = filter.relativeName {
+        var matchClauses: [String] = []
+        if !filter.pathValues.isEmpty {
+            let values = filter.pathValues.sorted()
+            matchClauses.append("target.path IN (\(placeholders(count: values.count)))")
+            bindings.append(contentsOf: values.map(SQLiteValue.text))
+        }
+
+        if !filter.relativeNames.isEmpty {
             let parentExpression = outerParentExpression(tablePrefix: tablePrefix)
-            targetClauses.append(
-                """
-                target.path = (
-                    CASE
-                        WHEN \(parentExpression) = '' OR \(parentExpression) = '/'
-                            THEN '/' || ?
-                        ELSE \(parentExpression) || '/' || ?
-                    END
-                )
-                """
+            let relativeClauses = Array(
+                repeating: """
+                    target.path = (
+                        CASE
+                            WHEN \(parentExpression) = '' OR \(parentExpression) = '/'
+                                THEN '/' || ?
+                            ELSE \(parentExpression) || '/' || ?
+                        END
+                    )
+                    """,
+                count: filter.relativeNames.count
             )
-            bindings.append(.text(relativeName))
-            bindings.append(.text(relativeName))
-        } else {
+            matchClauses.append(contentsOf: relativeClauses)
+            for relativeName in filter.relativeNames.sorted() {
+                bindings.append(.text(relativeName))
+                bindings.append(.text(relativeName))
+            }
+        }
+
+        guard !matchClauses.isEmpty else {
             return ("1 = 1", [])
         }
+        targetClauses.append("(\(matchClauses.joined(separator: " OR ")))")
 
         if let allowedKinds = filter.allowedKinds {
             let kinds = allowedKinds.map(\.rawValue).sorted()
@@ -2083,7 +2141,7 @@ private final class SQLiteDatabase {
         return Date(timeIntervalSince1970: seconds)
     }
 
-    private func insert(entries: [FileEntry]) throws {
+    private func insert(entries: [FileEntry], bulkRebuildSearchIndexes: Bool = false) throws {
         let entrySQL = """
             INSERT OR REPLACE INTO entries (
                 path, name, parent, extension_name, exact_extension_name, exact_name_part,
@@ -2143,20 +2201,36 @@ private final class SQLiteDatabase {
                         ])
                         try entryStatement.stepDone()
 
-                        try ftsStatement.reset()
-                        try ftsStatement.bind([
-                            .text(entry.path),
-                            .text(entry.name),
-                            .text(entry.parent)
-                        ])
-                        try ftsStatement.stepDone()
+                        // In bulk-rebuild mode the FTS/trigram tables are filled
+                        // in one INSERT...SELECT pass after the base table is
+                        // fully populated (faster than interleaved per-row
+                        // inserts). Only valid when those tables start empty,
+                        // i.e. a full replace() — never an incremental upsert.
+                        if !bulkRebuildSearchIndexes {
+                            try ftsStatement.reset()
+                            try ftsStatement.bind([
+                                .text(entry.path),
+                                .text(entry.name),
+                                .text(entry.parent)
+                            ])
+                            try ftsStatement.stepDone()
 
-                        try trigramStatement.reset()
-                        try trigramStatement.bind([.text(entry.path)])
-                        try trigramStatement.stepDone()
+                            try trigramStatement.reset()
+                            try trigramStatement.bind([.text(entry.path)])
+                            try trigramStatement.stepDone()
+                        }
                     }
                 }
             }
+        }
+
+        if bulkRebuildSearchIndexes {
+            try execute(
+                "INSERT INTO entries_fts(path, name, parent) SELECT path, name, parent FROM entries;"
+            )
+            try execute(
+                "INSERT INTO entries_trigram(path) SELECT path FROM entries;"
+            )
         }
     }
 

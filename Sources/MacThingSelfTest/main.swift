@@ -676,6 +676,18 @@ expect(
     "depth:0 should match root-level entries"
 )
 
+// Regression: depth must count parent path segments (== split("/").count), the
+// value the SQLite candidate filter also uses. Guards the depth off-by-one fix
+// for N>0, which depth:0 alone does not cover.
+expect(
+    SearchEngine.search(query: "depth:4", in: [pathMatch, deepPathMatch]).map(\.path) == [pathMatch.path],
+    "depth:N should count parent segments (/Users/me/project/archive => 4)"
+)
+expect(
+    SearchEngine.search(query: "depth:5", in: [pathMatch, deepPathMatch]).map(\.path) == [deepPathMatch.path],
+    "depth:N should count one deeper for a nested parent (=> 5)"
+)
+
 let selfTestHomePath = FileManager.default.homeDirectoryForCurrentUser.path
 let selfTestDesktopPath = URL(fileURLWithPath: selfTestHomePath).appendingPathComponent("Desktop").path
 let shellDesktopFolder = FileEntry(
@@ -2303,6 +2315,24 @@ expect(
     "relative ancestor: values should match ancestor folder names"
 )
 
+// Regression: a parent path containing a doubled slash must not crash the
+// ancestor-chain walk (parentDirectoryPath falls back to URL for "//" paths
+// instead of recursing). normalizedFolderPath does not collapse internal "//",
+// so such a path can reach parentDirectoryPath unchanged.
+let doubledSlashEntry = FileEntry(
+    path: "/Users//me/Docs/sub/report.txt",
+    name: "report.txt",
+    parent: "/Users//me/Docs/sub",
+    kind: .file,
+    byteSize: 10,
+    modifiedAt: Date(timeIntervalSince1970: 3_300),
+    indexedAt: Date(timeIntervalSince1970: 3_300)
+)
+expect(
+    SearchEngine.search(query: "ancestor-name:Docs", in: [doubledSlashEntry]).map(\.path) == [doubledSlashEntry.path],
+    "ancestor walk should handle doubled-slash parent paths without crashing"
+)
+
 expect(
     SearchEngine.search(query: "parent-sibling:Empty", in: syntaxEntries).map(\.path) == [childInFolder.path],
     "parent-sibling: should match entries whose parent has a matching sibling"
@@ -2765,10 +2795,96 @@ expect(
     "type:link should match symbolic links"
 )
 
+// mime: operator — MIME type derived from extension via UTType at query time
+// (no schema/index change). photo=image/jpeg, document(.md)=text/markdown,
+// audioEntry(.m4a)=audio/x-m4a, videoEntry(.mov)=video/quicktime, archive(.zip)=application/zip.
+expect(
+    SearchEngine.search(query: "mime:image/*", in: categoryEntries).map(\.path) == [photo.path],
+    "mime: subtype wildcard should match by primary MIME type"
+)
+expect(
+    SearchEngine.search(query: "mime:image/jpeg", in: categoryEntries).map(\.path) == [photo.path],
+    "mime: exact pattern should match the precise MIME type"
+)
+expect(
+    SearchEngine.search(query: "mime:video/quicktime", in: categoryEntries).map(\.path) == [videoEntry.path],
+    "mime: should match video types"
+)
+expect(
+    SearchEngine.search(query: "mime:application/zip", in: categoryEntries).map(\.path) == [archiveEntry.path],
+    "mime: should match archive types"
+)
+expect(
+    SearchEngine.search(query: "mime:audio/*", in: categoryEntries).map(\.path) == [audioEntry.path],
+    "mime: audio wildcard should match audio files only"
+)
+expect(
+    SearchEngine.search(query: "content-type:text/*", in: categoryEntries).map(\.path) == [document.path],
+    "content-type: alias should resolve to the mime operator"
+)
+// Consistency guard: mime: must NOT push down as a SQLite candidate term
+// (extension-derived, evaluated in memory) — same protection as content:.
+let mimeHint = SearchEngine.candidateHint(for: SearchRequest(query: "mime:image/*"))
+expect(
+    !mimeHint.canUseDatabaseCandidates && mimeHint.terms.isEmpty,
+    "mime: searches must not be pushed into lossy SQLite candidate terms"
+)
+// Combined with a text term, the whole query must still fall back to in-memory
+// (mime: can't push down, so no backing-dependent divergence is possible).
+let mimeCombinedHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch mime:image/*"))
+expect(
+    !mimeCombinedHint.canUseDatabaseCandidates,
+    "a query combining text with mime: must not use the SQLite candidate path"
+)
+
 let simpleHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch notes"))
 expect(
     simpleHint.canUseDatabaseCandidates && simpleHint.terms == ["launch", "notes"],
     "simple text searches should produce SQLite candidate terms"
+)
+
+// Fuzzy candidate policy: substring/FTS candidates are a strict subset of fuzzy
+// (subsequence) matches, so text terms must NOT push down under fuzzy or
+// subsequence-only matches are silently dropped on the database path.
+var fuzzyOnlyOptions = SearchOptions()
+fuzzyOnlyOptions.fuzzyMatching = true
+let bareFuzzyHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch notes", options: fuzzyOnlyOptions))
+    .resolvingFuzzyCandidatePolicy(fuzzyMatching: true)
+expect(
+    !bareFuzzyHint.canUseDatabaseCandidates && bareFuzzyHint.terms.isEmpty,
+    "fuzzy bare-term searches must fall back to in-memory (no substring candidate pushdown)"
+)
+
+let fuzzyWithFilterHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch ext:jpg", options: fuzzyOnlyOptions))
+    .resolvingFuzzyCandidatePolicy(fuzzyMatching: true)
+expect(
+    fuzzyWithFilterHint.canUseDatabaseCandidates &&
+        fuzzyWithFilterHint.terms.isEmpty &&
+        fuzzyWithFilterHint.extensions == ["jpg"],
+    "fuzzy searches with structured filters should push the filters but drop the text terms"
+)
+
+var nonFuzzyOptions = SearchOptions()
+nonFuzzyOptions.fuzzyMatching = false
+let nonFuzzyHint = SearchEngine.candidateHint(for: SearchRequest(query: "launch notes", options: nonFuzzyOptions))
+    .resolvingFuzzyCandidatePolicy(fuzzyMatching: false)
+expect(
+    nonFuzzyHint.canUseDatabaseCandidates && nonFuzzyHint.terms == ["launch", "notes"],
+    "non-fuzzy searches should still push text terms into SQLite candidates"
+)
+
+// A negated text term must NOT be pushed as a positive SQLite candidate (that
+// would return the OPPOSITE set); it is excluded and evaluated in memory, while
+// any positive sibling term still pushes down to narrow the candidate set.
+let negatedTermHint = SearchEngine.candidateHint(for: SearchRequest(query: "!launch notes"))
+expect(
+    negatedTermHint.terms == ["notes"],
+    "negated text terms must be excluded from SQLite candidate terms"
+)
+let negatedOnlyHint = SearchEngine.candidateHint(for: SearchRequest(query: "!launch"))
+expect(
+    !negatedOnlyHint.canUseDatabaseCandidates && negatedOnlyHint.terms.isEmpty,
+    "a negation-only search must fall back to in-memory (no candidate terms)"
 )
 
 let countHint = SearchEngine.candidateHint(for: SearchRequest(query: "count:1 launch"))
@@ -4175,11 +4291,28 @@ expect(
     "exact file-exists: searches should be pushed into SQLite candidate hints"
 )
 
+let listedFileExistsHint = SearchEngine.candidateHint(for: SearchRequest(query: "file-exists:Track.jpg;Missing.jpg"))
+expect(
+    listedFileExistsHint.canUseDatabaseCandidates &&
+        listedFileExistsHint.existsFilters.first?.relativeNames == Set(["Track.jpg", "Missing.jpg"]),
+    "file-exists: value lists should be pushed into SQLite candidate hints"
+)
+
 let absoluteExistsHint = SearchEngine.candidateHint(for: SearchRequest(query: "exists:/Users/me/Music/Track.jpg"))
 expect(
     absoluteExistsHint.canUseDatabaseCandidates &&
         absoluteExistsHint.existsFilters.first?.pathValue == "/Users/me/Music/Track.jpg",
     "absolute exists: searches should be pushed into SQLite candidate hints"
+)
+
+let listedAbsoluteExistsHint = SearchEngine.candidateHint(
+    for: SearchRequest(query: "exists:/Users/me/Music/Track.jpg;/Users/me/Music/Missing.jpg")
+)
+expect(
+    listedAbsoluteExistsHint.canUseDatabaseCandidates &&
+        listedAbsoluteExistsHint.existsFilters.first?.pathValues ==
+            Set(["/Users/me/Music/Track.jpg", "/Users/me/Music/Missing.jpg"]),
+    "absolute exists: value lists should be pushed into SQLite candidate hints"
 )
 
 let folderExistsHint = SearchEngine.candidateHint(for: SearchRequest(query: "folder-exists:Archive"))
@@ -5444,6 +5577,220 @@ do {
         "content: should fall back to Windows-1252 text"
     )
 
+    // contentdupe: — byte-identical content detection (reads files, size-grouped
+    // then SHA256). Strong cases: two identical files, one SAME-SIZE-but-different
+    // (hash must distinguish), one unique-size (skipped, content-unique for free).
+    let dupeAData = Data("duplicate-content-payload".utf8)   // 25 bytes
+    let dupeBData = Data("duplicate-content-payload".utf8)   // 25 bytes, identical
+    let sameSizeData = Data("DIFFERENT-content-payload".utf8) // 25 bytes, different
+    let uniqueData = Data("short".utf8)                       // 5 bytes, unique size
+    let dupeAFile = temporaryDirectory.appending(path: "DupeA.bin")
+    let dupeBFile = temporaryDirectory.appending(path: "DupeB.bin")
+    let sameSizeFile = temporaryDirectory.appending(path: "SameSize.bin")
+    let uniqueContentFile = temporaryDirectory.appending(path: "UniqueContent.bin")
+    try dupeAData.write(to: dupeAFile)
+    try dupeBData.write(to: dupeBFile)
+    try sameSizeData.write(to: sameSizeFile)
+    try uniqueData.write(to: uniqueContentFile)
+    func contentDupeEntry(_ url: URL, _ data: Data) -> FileEntry {
+        FileEntry(
+            path: canonicalPath(url.path),
+            name: url.lastPathComponent,
+            parent: canonicalTemporaryDirectoryPath,
+            kind: .file,
+            byteSize: Int64(data.count),
+            modifiedAt: Date()
+        )
+    }
+    let contentDupeEntries = [
+        contentDupeEntry(dupeAFile, dupeAData),
+        contentDupeEntry(dupeBFile, dupeBData),
+        contentDupeEntry(sameSizeFile, sameSizeData),
+        contentDupeEntry(uniqueContentFile, uniqueData)
+    ]
+    let dupeContentResults = Set(SearchEngine.search(query: "contentdupe:", in: contentDupeEntries).map(\.path))
+    expect(
+        dupeContentResults == Set([canonicalPath(dupeAFile.path), canonicalPath(dupeBFile.path)]),
+        "contentdupe: should match only byte-identical files (size collision alone is not a match)"
+    )
+    let uniqueContentResults = Set(SearchEngine.search(query: "contentdupe:0", in: contentDupeEntries).map(\.path))
+    expect(
+        uniqueContentResults == Set([canonicalPath(sameSizeFile.path), canonicalPath(uniqueContentFile.path)]),
+        "contentdupe:0 should match content-unique files (incl. same-size-different-content)"
+    )
+    // mime:/content: family consistency — contentdupe: must not push to SQLite.
+    let contentDupeHint = SearchEngine.candidateHint(for: SearchRequest(query: "contentdupe:"))
+    expect(
+        !contentDupeHint.canUseDatabaseCandidates && contentDupeHint.terms.isEmpty,
+        "contentdupe: must not be pushed into SQLite candidate terms (hash not indexed)"
+    )
+    // A file with no indexed size is never examined, so it must match NEITHER
+    // contentdupe: NOR contentdupe:0 ("not examined" ≠ "verified unique").
+    let unsizedEntry = FileEntry(
+        path: canonicalPath(uniqueContentFile.path),
+        name: "UniqueContent.bin",
+        parent: canonicalTemporaryDirectoryPath,
+        kind: .file,
+        byteSize: nil,
+        modifiedAt: Date()
+    )
+    let unsizedDupe = SearchEngine.search(query: "contentdupe:", in: [unsizedEntry]).map(\.path)
+    let unsizedUnique = SearchEngine.search(query: "contentdupe:0", in: [unsizedEntry]).map(\.path)
+    expect(
+        unsizedDupe.isEmpty && unsizedUnique.isEmpty,
+        "files with no indexed size must match neither contentdupe: nor contentdupe:0 (unexamined)"
+    )
+
+    // linkcount: — hard-link count via stat() at query time (not indexed).
+    // Create a hard-linked pair (nlink 2) plus a single-link file (nlink 1).
+    let linkSourceFile = temporaryDirectory.appending(path: "LinkSource.bin")
+    try Data("link-payload".utf8).write(to: linkSourceFile)
+    let linkAliasFile = temporaryDirectory.appending(path: "LinkAlias.bin")
+    try FileManager.default.linkItem(at: linkSourceFile, to: linkAliasFile)
+    let singleLinkFile = temporaryDirectory.appending(path: "SingleLink.bin")
+    try Data("single-payload".utf8).write(to: singleLinkFile)
+    func linkEntry(_ url: URL) -> FileEntry {
+        FileEntry(
+            path: canonicalPath(url.path),
+            name: url.lastPathComponent,
+            parent: canonicalTemporaryDirectoryPath,
+            kind: .file,
+            byteSize: 12,
+            modifiedAt: Date()
+        )
+    }
+    let linkEntries = [linkEntry(linkSourceFile), linkEntry(linkAliasFile), linkEntry(singleLinkFile)]
+    let multiLinkResults = Set(SearchEngine.search(query: "linkcount:>1", in: linkEntries).map(\.path))
+    expect(
+        multiLinkResults == Set([canonicalPath(linkSourceFile.path), canonicalPath(linkAliasFile.path)]),
+        "linkcount:>1 should match hard-linked files (the linked pair)"
+    )
+    let singleLinkResults = SearchEngine.search(query: "linkcount:1", in: linkEntries).map(\.path)
+    expect(
+        singleLinkResults == [canonicalPath(singleLinkFile.path)],
+        "linkcount:1 should match files with a single hard link"
+    )
+    // The `<` operator takes a different tokenizer path than `>`; verify it too
+    // (a single-link file has nlink 1 < 2).
+    let lessThanResults = SearchEngine.search(query: "linkcount:<2", in: linkEntries).map(\.path)
+    expect(
+        lessThanResults == [canonicalPath(singleLinkFile.path)],
+        "linkcount:<2 should match single-link files (less-than operator path)"
+    )
+    let hardlinksAlias = Set(SearchEngine.search(query: "hardlinks:>=2", in: linkEntries).map(\.path))
+    expect(
+        hardlinksAlias == multiLinkResults,
+        "hardlinks: should alias linkcount:"
+    )
+    let linkCountHint = SearchEngine.candidateHint(for: SearchRequest(query: "linkcount:>1"))
+    expect(
+        !linkCountHint.canUseDatabaseCandidates && linkCountHint.terms.isEmpty,
+        "linkcount: must not be pushed into SQLite candidate terms (nlink not indexed)"
+    )
+
+    // perm: — POSIX permission bits via stat() at query time (not indexed),
+    // mirroring `find -perm`: exact (644), all-bits (-002), any-bits (/111).
+    let perm644File = temporaryDirectory.appending(path: "Perm644.bin")
+    try Data("a".utf8).write(to: perm644File)
+    try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: perm644File.path)
+    let perm755File = temporaryDirectory.appending(path: "Perm755.bin")
+    try Data("b".utf8).write(to: perm755File)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: perm755File.path)
+    let worldWritableFile = temporaryDirectory.appending(path: "WorldWritable.bin")
+    try Data("c".utf8).write(to: worldWritableFile)
+    try FileManager.default.setAttributes([.posixPermissions: 0o666], ofItemAtPath: worldWritableFile.path)
+    func permEntry(_ url: URL) -> FileEntry {
+        FileEntry(
+            path: canonicalPath(url.path),
+            name: url.lastPathComponent,
+            parent: canonicalTemporaryDirectoryPath,
+            kind: .file,
+            byteSize: 1,
+            modifiedAt: Date()
+        )
+    }
+    let permEntries = [permEntry(perm644File), permEntry(perm755File), permEntry(worldWritableFile)]
+    expect(
+        SearchEngine.search(query: "perm:644", in: permEntries).map(\.path) == [canonicalPath(perm644File.path)],
+        "perm:NNN should match exact permission bits"
+    )
+    expect(
+        Set(SearchEngine.search(query: "perm:/111", in: permEntries).map(\.path)) == Set([canonicalPath(perm755File.path)]),
+        "perm:/NNN should match files with ANY of the listed bits (executable)"
+    )
+    expect(
+        Set(SearchEngine.search(query: "perm:-002", in: permEntries).map(\.path)) == Set([canonicalPath(worldWritableFile.path)]),
+        "perm:-NNN should match files with ALL listed bits set (world-writable)"
+    )
+    expect(
+        Set(SearchEngine.search(query: "mode:-044", in: permEntries).map(\.path)) ==
+            Set([canonicalPath(perm644File.path), canonicalPath(perm755File.path), canonicalPath(worldWritableFile.path)]),
+        "mode: alias with -044 should match all files readable by group+other"
+    )
+    let permHint = SearchEngine.candidateHint(for: SearchRequest(query: "perm:644"))
+    expect(
+        !permHint.canUseDatabaseCandidates && permHint.terms.isEmpty,
+        "perm: must not be pushed into SQLite candidate terms (st_mode not indexed)"
+    )
+
+    // owner:/group: — st_uid/st_gid via stat() at query time (not indexed). The
+    // temp files are owned by the running user, so owner:<myuid> matches them
+    // and a nonexistent uid matches nothing. Query value resolves once (numeric
+    // or name) and compares against the entry's st_uid/st_gid integer.
+    let myUID = Int(getuid())
+    let myGID = Int(getgid())
+    let ownerEntries = permEntries  // three real temp files owned by this user
+    let ownerMatches = Set(SearchEngine.search(query: "owner:\(myUID)", in: ownerEntries).map(\.path))
+    expect(
+        ownerMatches == Set(ownerEntries.map(\.path)),
+        "owner:<uid> should match files owned by that user id"
+    )
+    let groupMatches = Set(SearchEngine.search(query: "group:\(myGID)", in: ownerEntries).map(\.path))
+    expect(
+        groupMatches == Set(ownerEntries.map(\.path)),
+        "group:<gid> should match files in that group id"
+    )
+    // A uid that does not own these files matches none of them.
+    let foreignUID = myUID == 0 ? 12_345 : 0
+    expect(
+        SearchEngine.search(query: "owner:\(foreignUID)", in: ownerEntries).isEmpty,
+        "owner:<other-uid> should not match files owned by a different user"
+    )
+    // Name resolution path: "root" resolves to uid 0, which owns none of these.
+    expect(
+        SearchEngine.search(query: "owner:root", in: ownerEntries).isEmpty || myUID == 0,
+        "owner:<name> should resolve a user name to its uid"
+    )
+    let ownerHint = SearchEngine.candidateHint(for: SearchRequest(query: "owner:\(myUID)"))
+    expect(
+        !ownerHint.canUseDatabaseCandidates && ownerHint.terms.isEmpty,
+        "owner: must not be pushed into SQLite candidate terms (st_uid not indexed)"
+    )
+
+    // Composition: the new stat-based operators must combine correctly with each
+    // other and with AND / OR / negation. permEntries = 644, 755, 666 — all owned
+    // by the running user/group.
+    expect(
+        SearchEngine.search(query: "owner:\(myUID) perm:-002", in: permEntries).map(\.path) ==
+            [canonicalPath(worldWritableFile.path)],
+        "owner: AND perm: should intersect (mine + world-writable = the 666 file)"
+    )
+    expect(
+        Set(SearchEngine.search(query: "!perm:-002", in: permEntries).map(\.path)) ==
+            Set([canonicalPath(perm644File.path), canonicalPath(perm755File.path)]),
+        "negated perm:-002 should match the non-world-writable files"
+    )
+    expect(
+        Set(SearchEngine.search(query: "perm:644 | perm:755", in: permEntries).map(\.path)) ==
+            Set([canonicalPath(perm644File.path), canonicalPath(perm755File.path)]),
+        "perm: OR perm: should union exact-permission matches"
+    )
+    expect(
+        SearchEngine.search(query: "perm:/111 group:\(myGID) Perm755", in: permEntries).map(\.path) ==
+            [canonicalPath(perm755File.path)],
+        "perm: + group: + text term should all AND together"
+    )
+
     let tinyImageFile = temporaryDirectory.appending(path: "Tiny.png")
     let tinyImageBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAADklEQVR4nGP4z8DwHwQBEPgD/U6VwW8AAAAASUVORK5CYII="
     try Data(base64Encoded: tinyImageBase64)!.write(to: tinyImageFile)
@@ -5698,6 +6045,38 @@ do {
     let databaseURL = temporaryDirectory.appending(path: "MacThing.db")
     let initialSnapshot = IndexSnapshot(rootPath: temporaryDirectory.path, entries: [photo, document])
     try IndexStorage.save(initialSnapshot, to: databaseURL)
+
+    // Guard the bulk-rebuild write path (save → replace builds FTS/trigram via
+    // one INSERT...SELECT instead of per-row): an FTS term-match candidate query
+    // against a save-only DB must return exactly the matching rows — proving the
+    // FTS table was populated (not left empty) and not duplicated.
+    let bulkRebuildURL = temporaryDirectory.appending(path: "BulkRebuild.db")
+    let bulkEntryA = FileEntry(
+        path: "/Users/me/Bulk/quokka_report.txt", name: "quokka_report.txt",
+        parent: "/Users/me/Bulk", kind: .file, byteSize: 10, modifiedAt: Date(timeIntervalSince1970: 7_000)
+    )
+    let bulkEntryB = FileEntry(
+        path: "/Users/me/Bulk/quokka_notes.txt", name: "quokka_notes.txt",
+        parent: "/Users/me/Bulk", kind: .file, byteSize: 11, modifiedAt: Date(timeIntervalSince1970: 7_001)
+    )
+    let bulkEntryC = FileEntry(
+        path: "/Users/me/Bulk/unrelated.txt", name: "unrelated.txt",
+        parent: "/Users/me/Bulk", kind: .file, byteSize: 12, modifiedAt: Date(timeIntervalSince1970: 7_002)
+    )
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: "/Users/me", entries: [bulkEntryA, bulkEntryB, bulkEntryC]),
+        to: bulkRebuildURL
+    )
+    let bulkTermCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "quokka")),
+        limit: 20,
+        from: bulkRebuildURL
+    )
+    expect(
+        bulkTermCandidates.count == 2 &&
+            Set(bulkTermCandidates.map(\.path)) == Set([bulkEntryA.path, bulkEntryB.path]),
+        "bulk-rebuilt FTS must return exactly the matching rows (populated, not empty, not duplicated)"
+    )
 
     let fileListSourceURL = temporaryDirectory.appending(path: "FileLists.json")
     let fileListSource = FileListSource(
@@ -6316,6 +6695,17 @@ do {
         "SQLite candidate search should apply depth filters"
     )
 
+    // Cross-consistency: the SAME depth:N query must return the SAME entries
+    // whether evaluated in memory or via the SQLite candidate path. Guards
+    // against in-memory `FileEntry.depth` drifting from the SQLite depth SQL
+    // formula (the kind of backing-dependent divergence the fuzzy fix addressed).
+    let depthCrossEntries = [rootLevelEntry, document, childInFolder, nestedGrandchild]
+    let depthInMemory = Set(SearchEngine.search(query: "depth:4", in: depthCrossEntries).map(\.path))
+    expect(
+        depthInMemory == Set(depthCandidates.map(\.path)),
+        "depth:N must return identical results in-memory and via SQLite candidates"
+    )
+
     let parentCountCandidates = try IndexStorage.candidateEntries(
         hint: SearchEngine.candidateHint(for: SearchRequest(query: "parent-count:>=4")),
         limit: 20,
@@ -6341,6 +6731,16 @@ do {
         "SQLite candidate search should apply exact relative file-exists filters"
     )
 
+    let listedFileExistsCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(for: SearchRequest(query: "file-exists:Track.jpg;Missing.jpg")),
+        limit: 20,
+        from: existsCandidateDatabaseURL
+    )
+    expect(
+        Set(listedFileExistsCandidates.map(\.path)) == Set([sidecarAudio.path, sidecarImage.path]),
+        "SQLite candidate search should apply relative file-exists value-list filters"
+    )
+
     let combinedFileExistsCandidates = try IndexStorage.candidateEntries(
         hint: SearchEngine.candidateHint(for: SearchRequest(query: "ext:mp3 file-exists:Track.jpg")),
         limit: 20,
@@ -6362,6 +6762,19 @@ do {
         "SQLite candidate search should apply absolute exists filters"
     )
 
+    let listedAbsoluteExistsCandidates = try IndexStorage.candidateEntries(
+        hint: SearchEngine.candidateHint(
+            for: SearchRequest(query: "exists:/Users/me/Music/Track.jpg;/Users/me/Music/Missing.jpg")
+        ),
+        limit: 20,
+        from: existsCandidateDatabaseURL
+    )
+    expect(
+        Set(listedAbsoluteExistsCandidates.map(\.path)) ==
+            Set([sidecarAudio.path, sidecarImage.path, matchingFolderFile.path, matchingFolder.path]),
+        "SQLite candidate search should apply absolute exists value-list filters"
+    )
+
     let missingAbsoluteExistsCandidates = try IndexStorage.candidateEntries(
         hint: SearchEngine.candidateHint(for: SearchRequest(query: "exists:/Users/me/Music/Missing.jpg")),
         limit: 20,
@@ -6380,6 +6793,79 @@ do {
     expect(
         Set(folderExistsCandidates.map(\.path)) == Set([matchingFolderFile.path, matchingFolder.path]),
         "SQLite candidate search should apply exact folder-exists filters"
+    )
+
+    // End-to-end fuzzy candidate policy: a subsequence-only query ("bnchmrk"
+    // matches "benchmark_report" but is NOT a substring) must survive the
+    // SQLite candidate path. The smart-hybrid drops the text term (which would
+    // become a lossy substring LIKE) while pushing the ext: filter, then the
+    // in-memory re-scoring recovers the fuzzy match.
+    let fuzzyDatabaseURL = temporaryDirectory.appending(path: "FuzzyCandidates.db")
+    let fuzzyBenchmarkTxt = FileEntry(
+        path: "/Users/me/Bench/benchmark_report.txt",
+        name: "benchmark_report.txt",
+        parent: "/Users/me/Bench",
+        kind: .file,
+        byteSize: 100,
+        modifiedAt: Date(timeIntervalSince1970: 3_000),
+        indexedAt: Date(timeIntervalSince1970: 3_000)
+    )
+    let fuzzyConfigTxt = FileEntry(
+        path: "/Users/me/Bench/config_notes.txt",
+        name: "config_notes.txt",
+        parent: "/Users/me/Bench",
+        kind: .file,
+        byteSize: 101,
+        modifiedAt: Date(timeIntervalSince1970: 3_001),
+        indexedAt: Date(timeIntervalSince1970: 3_001)
+    )
+    let fuzzyBenchmarkSwift = FileEntry(
+        path: "/Users/me/Bench/benchmark.swift",
+        name: "benchmark.swift",
+        parent: "/Users/me/Bench",
+        kind: .file,
+        byteSize: 102,
+        modifiedAt: Date(timeIntervalSince1970: 3_002),
+        indexedAt: Date(timeIntervalSince1970: 3_002)
+    )
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: "/Users/me", entries: [fuzzyBenchmarkTxt, fuzzyConfigTxt, fuzzyBenchmarkSwift]),
+        to: fuzzyDatabaseURL
+    )
+
+    var fuzzyOptions = SearchOptions()
+    fuzzyOptions.fuzzyMatching = true
+
+    // Bare fuzzy term → no structured filter survives → must NOT use the
+    // database candidate path (the app falls back to a full in-memory scan).
+    let bareFuzzyDBHint = SearchEngine.candidateHint(for: SearchRequest(query: "bnchmrk", options: fuzzyOptions))
+        .resolvingFuzzyCandidatePolicy(fuzzyMatching: true)
+    expect(
+        !bareFuzzyDBHint.canUseDatabaseCandidates,
+        "fuzzy bare-term searches must not use the SQLite candidate path"
+    )
+
+    // Fuzzy + ext filter → ext: pushes down, term dropped. The candidate set is
+    // the ext:txt rows (substring LIKE on "bnchmrk" would have returned none).
+    let fuzzyFilterRequest = SearchRequest(query: "bnchmrk ext:txt", options: fuzzyOptions)
+    let fuzzyFilterHint = SearchEngine.candidateHint(for: fuzzyFilterRequest)
+        .resolvingFuzzyCandidatePolicy(fuzzyMatching: true)
+    let fuzzyFilterCandidates = try IndexStorage.candidateEntries(
+        hint: fuzzyFilterHint,
+        limit: 20,
+        from: fuzzyDatabaseURL
+    )
+    expect(
+        Set(fuzzyFilterCandidates.map(\.path)) == Set([fuzzyBenchmarkTxt.path, fuzzyConfigTxt.path]),
+        "fuzzy+ext SQLite candidates should be the extension-filtered set, not lossy substring matches"
+    )
+
+    // In-memory re-scoring over those candidates recovers the subsequence match
+    // (and only it), proving the fix end-to-end through the real DB path.
+    let fuzzyRescored = SearchEngine.searchCandidateSubset(request: fuzzyFilterRequest, in: fuzzyFilterCandidates)
+    expect(
+        fuzzyRescored.entries.map(\.path) == [fuzzyBenchmarkTxt.path],
+        "fuzzy re-scoring of SQLite candidates should recover the subsequence-only match"
     )
 
     let pathListCandidateDatabaseURL = temporaryDirectory.appending(path: "PathListCandidates.db")

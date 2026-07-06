@@ -98,7 +98,7 @@ The current packaged release is available from GitHub:
   (`frn:`) filters, root-entry (`root:`) filters, file-list provenance
   (`filelistfilename:`) filters, exact file-list source/value-list filters, exact
   name/stem/path-part contains and name prefix/suffix/equality filters, exact
-  existence filters, exact path-list and path-list value-list filters, empty-entry (`empty:`) filters,
+  existence/value-list filters, exact path-list and path-list value-list filters, empty-entry (`empty:`) filters,
   known shell-folder path filters, exact direct-parent/value-list filters, direct-child count,
   child attr/date/run-count/size,
   ancestor attribute filters, ancestor-child presence/exact filters, child
@@ -218,7 +218,11 @@ The current packaged release is available from GitHub:
   `document:`/`docs:`, `zip:`/`zips:`/`archives:`, `exe:`/`apps:`,
   `attrib:acdehilnoprst`/`attribute:h`,
   `hidden:`, `readonly:`, `system:`, `symlink:`, `package:`, `content:<text>`, `utf8content:<text>`,
-  `utf16content:<text>`, `utf16becontent:<text>`, and `ansicontent:<text>`.
+  `utf16content:<text>`, `utf16becontent:<text>`, `ansicontent:<text>`,
+  and `mime:<type>` (e.g. `mime:image/*`, `mime:application/pdf`),
+  `linkcount:<n>`/`hardlinks:<n>` (e.g. `linkcount:>1` for hard-linked files),
+  `perm:<octal>` (e.g. `perm:-002` for world-writable files),
+  and `owner:<user>`/`group:<group>` (e.g. `owner:root`, `group:staff`).
 - Indexed metadata includes name, path, extension, kind, size, created date,
   modified date, accessed date, indexed date, run count, date run, and file
   attributes.
@@ -287,6 +291,33 @@ The current packaged release is available from GitHub:
 - `content:<text>` explicitly searches small UTF-8, UTF-16, and Windows-1252
   text files as a slower secondary path; encoding-specific forms include
   `utf8content:`, `utf16content:`, `utf16becontent:`, and `ansicontent:`.
+- `mime:<type>` matches by MIME type derived from the file extension (via
+  `UTType`) at query time, so it needs no index changes. Supports exact types
+  (`mime:application/pdf`), subtype wildcards (`mime:image/*`), and match-any
+  (`mime:*`); aliases: `mimetype:`, `mime-type:`, `contenttype:`, `content-type:`.
+- `contentdupe:` finds files whose bytes are identical to another indexed
+  file's, computed at query time (never indexed): files are grouped by size,
+  then only same-size groups are SHA-256 hashed (unique-size files are
+  content-unique for free), so size collisions alone are not matches.
+  `contentdupe:0` matches content-unique files; aliases: `dupecontent:`,
+  `duplicatecontent:`. Files that cannot be examined — unreadable, over 100 MB,
+  or with no indexed size — match neither `contentdupe:` nor `contentdupe:0`.
+  Detection is bounded by indexed-size accuracy (a stale index size hides a
+  match), and on very large indexes a `contentdupe:` query reads every
+  same-size file synchronously, so it is a deliberately on-demand operator.
+- `linkcount:<n>` matches a file's hard-link count (`st_nlink`), read via
+  `stat()` at query time (not indexed), e.g. `linkcount:>1` finds hard-linked
+  files and `linkcount:1` finds files with a single link. Accepts comparison
+  and range filters; aliases: `links:`, `hardlinks:`, `hardlinkcount:`, `nlink:`.
+- `perm:<octal>` matches POSIX permission bits (`st_mode & 07777`, incl.
+  setuid/setgid/sticky) read via `stat()` at query time (not indexed),
+  mirroring `find -perm`: `perm:644` (exact), `perm:-002` (all listed bits set,
+  e.g. world-writable), `perm:/111` (any listed bit set, e.g. executable).
+  Aliases: `perms:`, `permission:`, `permissions:`, `mode:`.
+- `owner:<user>` / `group:<group>` match a file's owner uid / group gid
+  (`st_uid` / `st_gid`) read via `stat()` at query time (not indexed). The value
+  is a numeric id (`owner:0`) or a name resolved once per query (`owner:root`,
+  `group:staff`). Aliases: `user:`, `uid:` and `gid:`, `groupname:`.
 - Local read-only HTTP query service:
   - `GET http://127.0.0.1:16245/api/status`
   - `GET http://127.0.0.1:16245/api/search?q=swift&limit=100&offset=0`
