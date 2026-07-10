@@ -82,6 +82,10 @@ The current packaged release is available from GitHub:
   pruning is active.
 - SQLite candidate windows adapt to query specificity, keeping very short
   searches broad while trimming more specific terms and structured filters.
+- Large fuzzy searches show an exact SQLite-backed preview first, typically in
+  a few milliseconds, then refine it with the complete subsequence match set in
+  the background. Typing uses a short adaptive debounce while sort, filter, and
+  index updates refresh immediately.
 - Short substring fallback searches try file-name candidates before expanding
   to parent/path candidates, reducing slow path scans for common short terms.
 - Path-like or punctuated terms keep substring fallback enabled even when FTS

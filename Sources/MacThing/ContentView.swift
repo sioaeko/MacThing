@@ -1231,7 +1231,7 @@ private struct StatusBar: View {
                     ProgressView()
                         .controlSize(.small)
                         .scaleEffect(0.55)
-                    Text("Searching")
+                    Text(store.isRefiningSearch ? "Refining" : "Searching")
                         .lineLimit(1)
                 }
                 .foregroundStyle(.secondary)

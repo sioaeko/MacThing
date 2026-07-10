@@ -332,6 +332,7 @@ final class SearchStore: ObservableObject {
     @Published var isIndexing = false
     @Published var isLoadingIndex = false
     @Published var isSearching = false
+    @Published var isRefiningSearch = false
     @Published var indexFreshnessWarning: String?
     @Published var statusText = "Ready"
     @Published var lastIndexedAt: Date?
@@ -550,7 +551,7 @@ final class SearchStore: ObservableObject {
         query = value
         scheduleSaveSettings()
         updateQueryServiceState()
-        scheduleSearch()
+        scheduleSearch(debounce: true)
         scheduleHistoryRecording(for: value)
     }
 
@@ -1518,6 +1519,7 @@ final class SearchStore: ObservableObject {
         lastIndexedAt = nil
         isLoadingIndex = false
         isSearching = false
+        isRefiningSearch = false
         indexFreshnessWarning = nil
         statusText = entries.isEmpty ? status : "\(entries.count.formatted()) items"
         updateQueryServiceState()
@@ -1891,6 +1893,7 @@ final class SearchStore: ObservableObject {
 
         isIndexing = true
         isSearching = false
+        isRefiningSearch = false
         indexFreshnessWarning = nil
         statusText = "\(reason): \(Self.displayName(forRootURL: rootURL))"
         results = []
@@ -2317,7 +2320,7 @@ final class SearchStore: ObservableObject {
         return false
     }
 
-    private func scheduleSearch() {
+    private func scheduleSearch(debounce: Bool = false) {
         let executionKey = currentSearchExecutionKey()
         if executionKey == pendingSearchExecutionKey || executionKey == lastSearchExecutionKey {
             return
@@ -2328,6 +2331,7 @@ final class SearchStore: ObservableObject {
         searchTask?.cancel()
         pendingSearchExecutionKey = executionKey
         isSearching = true
+        isRefiningSearch = false
         updateQueryServiceState()
 
         let query = query
@@ -2339,21 +2343,78 @@ final class SearchStore: ObservableObject {
         let indexURLs = enabledProfileIndexURLs
         let indexedCount = max(entries.count, storedIndexedCount)
         let activeFileListEntries = cachedActiveFileListEntries
+        let effectiveQuery = Self.effectiveQuery(userQuery: query, filter: activeFilter)
+        let request = SearchRequest(
+            query: effectiveQuery,
+            sortField: sortField,
+            sortDirection: sortDirection,
+            options: searchOptions
+        )
+        let previewRequest = indexedCount > 25_000 && !indexURLs.isEmpty
+            ? SearchEngine.fastDatabasePreviewRequest(for: request)
+            : nil
+        let debounceMilliseconds = debounce
+            ? Self.searchDebounceMilliseconds(
+                request: request,
+                indexedCount: indexedCount,
+                hasDatabaseIndex: !indexURLs.isEmpty,
+                hasFastPreview: previewRequest != nil
+            )
+            : 0
+
         searchTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(120))
+            if debounceMilliseconds > 0 {
+                try? await Task.sleep(for: .milliseconds(debounceMilliseconds))
+            }
             guard !Task.isCancelled else {
                 return
             }
 
-            let worker = Task.detached(priority: .userInitiated) {
-                let effectiveQuery = Self.effectiveQuery(userQuery: query, filter: activeFilter)
-                let request = SearchRequest(
-                    query: effectiveQuery,
-                    sortField: sortField,
-                    sortDirection: sortDirection,
-                    options: searchOptions
-                )
+            if let previewRequest {
+                let previewWorker = Task.detached(priority: .userInitiated) {
+                    Self.databaseBackedSearch(
+                        request: previewRequest,
+                        entries: entries,
+                        indexedCount: indexedCount,
+                        indexURLs: indexURLs,
+                        activeFileListEntries: activeFileListEntries
+                    )
+                }
+                let previewResponse = await withTaskCancellationHandler {
+                    await previewWorker.value
+                } onCancel: {
+                    previewWorker.cancel()
+                }
 
+                guard !Task.isCancelled else {
+                    return
+                }
+                if let previewResponse,
+                   !previewResponse.entries.isEmpty,
+                   let self,
+                   self.searchGeneration == generation {
+                    let previewDiagnostics = previewResponse.diagnostics.map {
+                        SearchDiagnostics(
+                            source: .databasePreview,
+                            durationMilliseconds: $0.durationMilliseconds,
+                            searchedEntryCount: $0.searchedEntryCount,
+                            builtFullContext: $0.builtFullContext,
+                            candidateCount: $0.candidateCount
+                        )
+                    }
+                    self.results = previewResponse.entries
+                    self.totalMatches = previewResponse.totalMatches
+                    self.searchWarnings = previewResponse.warnings
+                    self.lastSearchDiagnostics = previewDiagnostics
+                    self.isRefiningSearch = true
+                    self.updateQueryServiceState()
+                }
+            }
+
+            guard !Task.isCancelled else {
+                return
+            }
+            let worker = Task.detached(priority: .userInitiated) {
                 if let databaseResponse = Self.databaseBackedSearch(
                     request: request,
                     entries: entries,
@@ -2385,6 +2446,7 @@ final class SearchStore: ObservableObject {
             self.searchWarnings = response.warnings
             self.lastSearchDiagnostics = response.diagnostics
             self.isSearching = false
+            self.isRefiningSearch = false
             self.searchTask = nil
             self.pendingSearchExecutionKey = nil
             self.lastSearchExecutionKey = executionKey
@@ -2393,6 +2455,26 @@ final class SearchStore: ObservableObject {
                 self.selectedPath = nil
             }
         }
+    }
+
+    private nonisolated static func searchDebounceMilliseconds(
+        request: SearchRequest,
+        indexedCount: Int,
+        hasDatabaseIndex: Bool,
+        hasFastPreview: Bool
+    ) -> Int {
+        guard !request.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return 0
+        }
+
+        let hint = SearchEngine.candidateHint(for: request)
+            .resolvingFuzzyCandidatePolicy(fuzzyMatching: request.options.fuzzyMatching)
+        if indexedCount > 25_000,
+           hasDatabaseIndex,
+           (hint.canUseDatabaseCandidates || hasFastPreview) {
+            return 35
+        }
+        return indexedCount <= 25_000 ? 45 : 65
     }
 
     private func currentSearchExecutionKey() -> SearchExecutionKey {

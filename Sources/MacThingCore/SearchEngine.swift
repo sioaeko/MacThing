@@ -488,6 +488,7 @@ public enum SearchSource: String, Codable, Sendable {
     case memory
     case databaseWindow
     case databaseCandidates
+    case databasePreview
 
     public var displayName: String {
         switch self {
@@ -497,6 +498,8 @@ public enum SearchSource: String, Codable, Sendable {
             return "SQLite Window"
         case .databaseCandidates:
             return "SQLite Candidates"
+        case .databasePreview:
+            return "SQLite Preview"
         }
     }
 }
@@ -1250,6 +1253,27 @@ public enum SearchEngine {
             sortDirection: parsed.sortDirectionOverride ?? request.sortDirection,
             options: request.options
         )
+    }
+
+    public static func fastDatabasePreviewRequest(for request: SearchRequest) -> SearchRequest? {
+        guard request.options.fuzzyMatching,
+              !request.options.regexMatching,
+              !request.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+
+        let completeHint = candidateHint(for: request)
+            .resolvingFuzzyCandidatePolicy(fuzzyMatching: true)
+        guard !completeHint.canUseDatabaseCandidates else {
+            return nil
+        }
+
+        var previewRequest = request
+        previewRequest.options.fuzzyMatching = false
+        guard candidateHint(for: previewRequest).canUseDatabaseCandidates else {
+            return nil
+        }
+        return previewRequest
     }
 
     public static func candidateHint(for request: SearchRequest) -> SearchCandidateHint {

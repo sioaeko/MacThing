@@ -279,6 +279,22 @@ do {
         _ = try? IndexStorage.candidateEntries(hint: hint, limit: 500, from: dbURL)
     }
 
+    measure("Fuzzy preview: plan+query+rank (100k)", iterations: 5) {
+        let request = SearchRequest(query: "file_9999")
+        guard let previewRequest = SearchEngine.fastDatabasePreviewRequest(for: request) else {
+            return
+        }
+        let hint = SearchEngine.candidateHint(for: previewRequest)
+        guard let candidates = try? IndexStorage.candidateEntries(
+            hint: hint,
+            limit: hint.databaseCandidateLimit(requestedWindowEnd: previewRequest.limit),
+            from: dbURL
+        ) else {
+            return
+        }
+        _ = SearchEngine.searchCandidateSubset(request: previewRequest, in: candidates)
+    }
+
     measure("Window query: browse (100k)", iterations: 5) {
         _ = try? IndexStorage.windowEntries(limit: 500, offset: 0, from: dbURL)
     }

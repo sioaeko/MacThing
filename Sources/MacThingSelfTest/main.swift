@@ -199,6 +199,40 @@ expect(
     "structured-only searches should keep enough SQLite candidates for result windows"
 )
 
+let fuzzyPreviewRequest = SearchEngine.fastDatabasePreviewRequest(
+    for: SearchRequest(query: "bnchm")
+)
+expect(
+    fuzzyPreviewRequest?.query == "bnchm" &&
+        fuzzyPreviewRequest?.options.fuzzyMatching == false,
+    "plain fuzzy searches should expose a fast exact database preview request"
+)
+
+expect(
+    SearchEngine.fastDatabasePreviewRequest(
+        for: SearchRequest(query: "bnchm ext:swift")
+    ) == nil,
+    "structured fuzzy searches already eligible for database pruning should not duplicate preview work"
+)
+
+var nonFuzzyPreviewOptions = SearchOptions()
+nonFuzzyPreviewOptions.fuzzyMatching = false
+expect(
+    SearchEngine.fastDatabasePreviewRequest(
+        for: SearchRequest(query: "benchmark", options: nonFuzzyPreviewOptions)
+    ) == nil,
+    "non-fuzzy searches should not request a second database preview"
+)
+
+var regexPreviewOptions = SearchOptions()
+regexPreviewOptions.regexMatching = true
+expect(
+    SearchEngine.fastDatabasePreviewRequest(
+        for: SearchRequest(query: "^bench", options: regexPreviewOptions)
+    ) == nil,
+    "regex searches should not be treated as fuzzy preview searches"
+)
+
 func httpGet(port: UInt16, path: String, timeoutSeconds: Int = 5) throws -> String {
     let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
     guard fd >= 0 else {
