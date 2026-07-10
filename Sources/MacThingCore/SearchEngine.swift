@@ -1212,6 +1212,10 @@ public enum SearchEngine {
             options: request.options,
             buildFullIndexes: shouldBuildFullContext
         )
+        let preparedTextSearch = parsed.preparedTextExpression(
+            options: request.options,
+            allowsASCIICaseFolding: !usesTurkishCaseFolding
+        )
 
         var resultWindow = MatchWindow(
             request: effectiveRequest,
@@ -1224,7 +1228,13 @@ public enum SearchEngine {
             if index.isMultiple(of: 1_024), shouldCancel() {
                 return SearchResponse(entries: [], totalMatches: 0, warnings: parsed.warnings)
             }
-            if let score = parsed.score(entry: entry, options: request.options, context: context) {
+            let score: Int?
+            if let preparedTextSearch {
+                score = preparedTextSearch.score(entry)
+            } else {
+                score = parsed.score(entry: entry, options: request.options, context: context)
+            }
+            if let score {
                 totalMatches += 1
                 resultWindow.append(SearchMatch(score: score, entry: entry))
             }
@@ -4267,8 +4277,317 @@ private struct ParsedSearch {
         expression?.requiresFullContext ?? false
     }
 
+    func preparedTextExpression(
+        options: SearchOptions,
+        allowsASCIICaseFolding: Bool
+    ) -> PreparedTextExpression? {
+        guard let expression else {
+            return nil
+        }
+        return PreparedTextExpression(
+            expression,
+            options: options,
+            allowsASCIICaseFolding: allowsASCIICaseFolding
+        )
+    }
+
     func score(entry: FileEntry, options: SearchOptions, context: SearchContext) -> Int? {
         expression?.score(entry: entry, options: options, context: context)
+    }
+}
+
+// Plain text expressions dominate interactive searches. Compile their normalized
+// terms once, then score entries without re-entering the general predicate tree.
+private indirect enum PreparedTextExpression {
+    case term(PreparedPlainTextSearch)
+    case and([PreparedTextExpression])
+    case or([PreparedTextExpression])
+    case not(PreparedTextExpression)
+
+    init?(
+        _ expression: SearchExpression,
+        options: SearchOptions,
+        allowsASCIICaseFolding: Bool
+    ) {
+        switch expression {
+        case let .term(term):
+            guard case let .text(value) = term.predicate,
+                  let prepared = PreparedPlainTextSearch(
+                      value: value,
+                      options: options,
+                      allowsASCIICaseFolding: allowsASCIICaseFolding
+                  ) else {
+                return nil
+            }
+            self = .term(prepared)
+        case let .and(expressions):
+            let prepared = expressions.compactMap {
+                PreparedTextExpression(
+                    $0,
+                    options: options,
+                    allowsASCIICaseFolding: allowsASCIICaseFolding
+                )
+            }
+            guard prepared.count == expressions.count else {
+                return nil
+            }
+            self = .and(prepared)
+        case let .or(expressions):
+            let prepared = expressions.compactMap {
+                PreparedTextExpression(
+                    $0,
+                    options: options,
+                    allowsASCIICaseFolding: allowsASCIICaseFolding
+                )
+            }
+            guard prepared.count == expressions.count else {
+                return nil
+            }
+            self = .or(prepared)
+        case let .not(expression):
+            guard let prepared = PreparedTextExpression(
+                expression,
+                options: options,
+                allowsASCIICaseFolding: allowsASCIICaseFolding
+            ) else {
+                return nil
+            }
+            self = .not(prepared)
+        }
+    }
+
+    func score(_ entry: FileEntry) -> Int? {
+        switch self {
+        case let .term(term):
+            return term.score(entry)
+        case let .and(expressions):
+            var total = 0
+            for expression in expressions {
+                guard let score = expression.score(entry) else {
+                    return nil
+                }
+                total += score
+            }
+            return total
+        case let .or(expressions):
+            var best: Int?
+            for expression in expressions {
+                guard let score = expression.score(entry) else {
+                    continue
+                }
+                best = min(best ?? score, score)
+            }
+            return best
+        case let .not(expression):
+            return expression.score(entry) == nil ? 0 : nil
+        }
+    }
+}
+
+private struct PreparedPlainTextSearch {
+    private enum NameMatch: Equatable {
+        case exact
+        case prefix
+        case contains
+        case fuzzy
+        case none
+    }
+
+    private let normalizedQuery: String
+    private let options: SearchOptions
+    private let searchesPath: Bool
+    private let asciiMatcher: ASCIITextMatcher?
+
+    init?(
+        value: String,
+        options: SearchOptions,
+        allowsASCIICaseFolding: Bool
+    ) {
+        guard !value.contains("$"),
+              !options.regexMatching,
+              !options.wholeWordMatching else {
+            return nil
+        }
+
+        let normalizedQuery = SearchEngine.normalize(value, options: options)
+        guard !normalizedQuery.isEmpty else {
+            return nil
+        }
+
+        self.normalizedQuery = normalizedQuery
+        self.options = options
+        searchesPath = options.matchPath || value.contains("/") || value.contains("\\")
+
+        let canFoldASCII = options.caseSensitive || allowsASCIICaseFolding
+        if canFoldASCII, normalizedQuery.utf8.allSatisfy({ $0 < 0x80 }) {
+            asciiMatcher = ASCIITextMatcher(
+                needle: Array(normalizedQuery.utf8),
+                foldsCase: !options.caseSensitive
+            )
+        } else {
+            asciiMatcher = nil
+        }
+    }
+
+    func score(_ entry: FileEntry) -> Int? {
+        let nameMatch = matchName(entry.name)
+        switch nameMatch {
+        case .exact:
+            return 0
+        case .prefix:
+            return 4
+        case .contains:
+            return 12
+        case .fuzzy, .none:
+            break
+        }
+
+        if searchesPath, matchesPath(entry.path) {
+            return 28
+        }
+        return nameMatch == .fuzzy ? 56 : nil
+    }
+
+    private func matchName(_ candidate: String) -> NameMatch {
+        if let asciiMatcher,
+           let match = asciiMatcher.nameMatch(candidate, allowsFuzzy: options.fuzzyMatching) {
+            return match
+        }
+
+        let normalizedName = SearchEngine.normalize(candidate, options: options)
+        if normalizedName == normalizedQuery {
+            return .exact
+        }
+        if normalizedName.hasPrefix(normalizedQuery) {
+            return .prefix
+        }
+        if normalizedName.contains(normalizedQuery) {
+            return .contains
+        }
+        if options.fuzzyMatching,
+           SearchEngine.isSubsequence(normalizedQuery, of: normalizedName) {
+            return .fuzzy
+        }
+        return .none
+    }
+
+    private func matchesPath(_ candidate: String) -> Bool {
+        if let asciiMatcher,
+           let contains = asciiMatcher.contains(candidate) {
+            return contains
+        }
+        return SearchEngine.normalize(candidate, options: options).contains(normalizedQuery)
+    }
+
+    // A single pass computes exact, prefix, substring (KMP), and subsequence
+    // matches. Any non-ASCII byte returns control to the Unicode implementation.
+    private struct ASCIITextMatcher {
+        let needle: [UInt8]
+        let failureTable: [Int]
+        let foldsCase: Bool
+
+        init(needle: [UInt8], foldsCase: Bool) {
+            self.needle = needle
+            self.foldsCase = foldsCase
+
+            var table = [Int](repeating: 0, count: needle.count)
+            var prefixLength = 0
+            if needle.count > 1 {
+                for index in 1..<needle.count {
+                    while prefixLength > 0, needle[index] != needle[prefixLength] {
+                        prefixLength = table[prefixLength - 1]
+                    }
+                    if needle[index] == needle[prefixLength] {
+                        prefixLength += 1
+                    }
+                    table[index] = prefixLength
+                }
+            }
+            failureTable = table
+        }
+
+        func nameMatch(_ candidate: String, allowsFuzzy: Bool) -> NameMatch? {
+            var candidateLength = 0
+            var prefixMatches = true
+            var substringCursor = 0
+            var subsequenceCursor = 0
+            var foundSubstring = false
+
+            for rawByte in candidate.utf8 {
+                guard rawByte < 0x80 else {
+                    return nil
+                }
+                let byte = folded(rawByte)
+
+                if candidateLength < needle.count,
+                   byte != needle[candidateLength] {
+                    prefixMatches = false
+                }
+                candidateLength += 1
+
+                while substringCursor > 0, byte != needle[substringCursor] {
+                    substringCursor = failureTable[substringCursor - 1]
+                }
+                if byte == needle[substringCursor] {
+                    substringCursor += 1
+                    if substringCursor == needle.count {
+                        foundSubstring = true
+                        substringCursor = failureTable[substringCursor - 1]
+                    }
+                }
+
+                if subsequenceCursor < needle.count,
+                   byte == needle[subsequenceCursor] {
+                    subsequenceCursor += 1
+                }
+            }
+
+            if candidateLength == needle.count, prefixMatches {
+                return .exact
+            }
+            if candidateLength >= needle.count, prefixMatches {
+                return .prefix
+            }
+            if foundSubstring {
+                return .contains
+            }
+            if allowsFuzzy, subsequenceCursor == needle.count {
+                return .fuzzy
+            }
+            return NameMatch.none
+        }
+
+        func contains(_ candidate: String) -> Bool? {
+            var cursor = 0
+            var foundMatch = false
+            for rawByte in candidate.utf8 {
+                guard rawByte < 0x80 else {
+                    return nil
+                }
+                guard !foundMatch else {
+                    continue
+                }
+                let byte = folded(rawByte)
+                while cursor > 0, byte != needle[cursor] {
+                    cursor = failureTable[cursor - 1]
+                }
+                if byte == needle[cursor] {
+                    cursor += 1
+                    if cursor == needle.count {
+                        foundMatch = true
+                    }
+                }
+            }
+            return foundMatch
+        }
+
+        @inline(__always)
+        private func folded(_ byte: UInt8) -> UInt8 {
+            if foldsCase, byte >= 0x41, byte <= 0x5A {
+                return byte + 0x20
+            }
+            return byte
+        }
     }
 }
 

@@ -955,6 +955,140 @@ expect(
     "subsequence queries should match compact filename abbreviations"
 )
 
+let preparedSearchEntries = [
+    compactMatch,
+    FileEntry(
+        path: "/Users/me/Projects/Alpha/notes.txt",
+        name: "notes.txt",
+        parent: "/Users/me/Projects/Alpha",
+        kind: .file,
+        byteSize: 20,
+        modifiedAt: Date(timeIntervalSince1970: 20)
+    ),
+    FileEntry(
+        path: "/Users/me/Overlap/aaab.txt",
+        name: "aaab.txt",
+        parent: "/Users/me/Overlap",
+        kind: .file,
+        byteSize: 30,
+        modifiedAt: Date(timeIntervalSince1970: 30)
+    ),
+    FileEntry(
+        path: "/Users/me/Unicode/Café.txt",
+        name: "Café.txt",
+        parent: "/Users/me/Unicode",
+        kind: .file,
+        byteSize: 40,
+        modifiedAt: Date(timeIntervalSince1970: 40)
+    ),
+    FileEntry(
+        path: "/Users/me/Unicode/e\u{301}clair.txt",
+        name: "e\u{301}clair.txt",
+        parent: "/Users/me/Unicode",
+        kind: .file,
+        byteSize: 50,
+        modifiedAt: Date(timeIntervalSince1970: 50)
+    )
+]
+
+func expectPreparedSearchParity(
+    _ fastQuery: String,
+    baseline baselineQuery: String,
+    options: SearchOptions = SearchOptions(),
+    entries: [FileEntry] = preparedSearchEntries,
+    _ message: String
+) {
+    let fast = SearchEngine.search(
+        request: SearchRequest(query: fastQuery, options: options),
+        in: entries
+    )
+    let baseline = SearchEngine.search(
+        request: SearchRequest(query: baselineQuery, options: options),
+        in: entries
+    )
+    expect(
+        fast.totalMatches == baseline.totalMatches &&
+            fast.entries.map(\.path) == baseline.entries.map(\.path),
+        message
+    )
+}
+
+expectPreparedSearchParity(
+    "qrm",
+    baseline: "nocase:qrm",
+    "prepared fuzzy matching should preserve generic matcher results"
+)
+expectPreparedSearchParity(
+    "projects",
+    baseline: "nocase:projects",
+    "prepared path matching should preserve generic matcher results"
+)
+expectPreparedSearchParity(
+    "aab",
+    baseline: "nocase:aab",
+    "prepared substring matching should handle overlapping prefixes"
+)
+expectPreparedSearchParity(
+    "cafe",
+    baseline: "nocase:cafe",
+    "prepared matching should preserve Unicode folding results"
+)
+expectPreparedSearchParity(
+    "qrm projects",
+    baseline: "nocase:qrm nocase:projects",
+    "prepared multi-term AND matching should preserve generic matcher results"
+)
+expectPreparedSearchParity(
+    "qrm | projects",
+    baseline: "nocase:qrm | nocase:projects",
+    "prepared OR matching should preserve generic matcher results"
+)
+expectPreparedSearchParity(
+    "!qrm",
+    baseline: "!nocase:qrm",
+    "prepared negated matching should preserve generic matcher results"
+)
+
+let exactUnicodeOptions = SearchOptions(
+    matchPath: false,
+    caseSensitive: true,
+    diacriticSensitive: true
+)
+expectPreparedSearchParity(
+    "e",
+    baseline: "case:e",
+    options: exactUnicodeOptions,
+    "prepared matching should fall back for combining-character candidates"
+)
+
+let differentialSearchFragments = [
+    "alpha", "AAAB", "Report", "benchmark", "résumé", "e\u{301}clair",
+    "swift-file", "ProjectNotes", "ababaca", "plain"
+]
+let differentialSearchEntries = (0..<240).map { index in
+    let fragment = differentialSearchFragments[index % differentialSearchFragments.count]
+    let parent = index.isMultiple(of: 3)
+        ? "/Users/me/Projects/Module\(index % 17)"
+        : "/Users/me/Documents/Folder\(index % 19)"
+    let name = "\(fragment)_\(index).txt"
+    return FileEntry(
+        path: "\(parent)/\(name)",
+        name: name,
+        parent: parent,
+        kind: .file,
+        byteSize: Int64(index),
+        modifiedAt: Date(timeIntervalSince1970: TimeInterval(index))
+    )
+}
+for query in ["a", "aa", "aab", "aba", "ababaca", "alpha", "bnchm", "cafe", "resume", "rpt", "swift", "project", "txt", "zz"] {
+    expectPreparedSearchParity(
+        query,
+        baseline: "nocase:\(query)",
+        entries: differentialSearchEntries,
+        "prepared matcher should match the generic matcher for \(query)"
+    )
+}
+
 let wholeWordMatch = FileEntry(
     path: "/Users/me/Documents/Cat Video.txt",
     name: "Cat Video.txt",
