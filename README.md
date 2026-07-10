@@ -327,6 +327,11 @@ The current packaged release is available from GitHub:
 - Local read-only HTTP query service:
   - `GET http://127.0.0.1:16245/api/status`
   - `GET http://127.0.0.1:16245/api/search?q=swift&limit=100&offset=0`
+  - Settings > Query Service controls service availability, loopback port,
+    optional Bearer-token authentication, and browser Origin policy.
+  - CORS modes include disabled browser access, any HTTP/HTTPS loopback Origin,
+    or one exact custom Origin. Unapproved Origin requests are rejected with
+    `403` before index data is returned; valid OPTIONS preflight is supported.
   - Search accepts `sort`, `order`, `matchPath`, `fuzzy`, `case`,
     `regex`, `wholeWord`, `diacritics`, `limit`, `offset`, `format`, and `columns`
     query parameters.
@@ -352,7 +357,13 @@ swift run MacThingCLI -- status
 swift run MacThingCLI -- search swift --limit 20 --format csv --columns name,path
 swift run MacThingCLI -- search swift -n 20 -o 20 --sort name
 swift run MacThingCLI -- search swift -sort dm -order desc -csv
+swift run MacThingCLI -- status --token <token>
+MACTHING_API_TOKEN=<token> swift run MacThingCLI -- search swift
 ```
+
+The service always binds to `127.0.0.1`. When authentication is enabled, pass
+the token with `--token`, `MACTHING_API_TOKEN`, or an
+`Authorization: Bearer <token>` request header.
 
 ## Package
 
@@ -424,4 +435,3 @@ ranking behavior through a normal executable target instead.
 4. Add deeper permission diagnostics with per-location read probes and guided
    remediation.
 5. Add per-file-list scheduling, remote refresh, and conflict diagnostics.
-6. Add configurable HTTP auth and CORS policy for non-default integrations.

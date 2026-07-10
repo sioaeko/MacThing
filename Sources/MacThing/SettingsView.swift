@@ -8,8 +8,263 @@ struct SettingsView: View {
                 .tabItem {
                     Label("Shortcuts", systemImage: "keyboard")
                 }
+
+            QueryServiceSettingsPane()
+                .tabItem {
+                    Label("Query Service", systemImage: "network")
+                }
         }
         .frame(width: 760, height: 620)
+    }
+}
+
+private struct QueryServiceSettingsPane: View {
+    @EnvironmentObject private var store: SearchStore
+    @State private var revealsToken = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 12) {
+                    Label("Query Service", systemImage: "network")
+                        .font(.title3.weight(.semibold))
+
+                    Spacer()
+
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(statusColor)
+                            .frame(width: 8, height: 8)
+                        Text(store.queryServiceStatusText)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    .help(store.queryServiceStatusText)
+
+                    Toggle("Query Service", isOn: enabledBinding)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .help("Enable query service")
+
+                    Button {
+                        store.resetQueryServiceSettings()
+                    } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Reset query service settings")
+                }
+
+                GroupBox("Server") {
+                    VStack(spacing: 0) {
+                        settingsRow("Bind Address") {
+                            Text("127.0.0.1")
+                                .font(.system(.body, design: .monospaced))
+                                .textSelection(.enabled)
+                        }
+
+                        Divider()
+
+                        settingsRow("Port") {
+                            HStack(spacing: 8) {
+                                TextField("Port", value: portBinding, format: .number)
+                                    .textFieldStyle(.roundedBorder)
+                                    .multilineTextAlignment(.trailing)
+                                    .frame(width: 92)
+
+                                Stepper("Port", value: portBinding, in: 1_024...65_535)
+                                    .labelsHidden()
+                            }
+                        }
+
+                        Divider()
+
+                        settingsRow("Endpoint") {
+                            HStack(spacing: 8) {
+                                Text(store.queryServiceEndpointText)
+                                    .font(.system(.body, design: .monospaced))
+                                    .lineLimit(1)
+                                    .textSelection(.enabled)
+
+                                Button {
+                                    store.copyQueryServiceEndpoint()
+                                } label: {
+                                    Image(systemName: "doc.on.doc")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Copy endpoint")
+                            }
+                        }
+                    }
+                }
+
+                GroupBox("Authentication") {
+                    VStack(spacing: 0) {
+                        settingsRow("Bearer Token") {
+                            Toggle("Require Bearer Token", isOn: authenticationBinding)
+                                .toggleStyle(.switch)
+                        }
+
+                        if store.queryServiceSettings.requiresAuthentication {
+                            Divider()
+
+                            settingsRow("Token") {
+                                HStack(spacing: 8) {
+                                    Group {
+                                        if revealsToken {
+                                            TextField("Token", text: tokenBinding)
+                                        } else {
+                                            SecureField("Token", text: tokenBinding)
+                                        }
+                                    }
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.system(.body, design: .monospaced))
+                                    .frame(width: 380)
+
+                                    Button {
+                                        revealsToken.toggle()
+                                    } label: {
+                                        Image(systemName: revealsToken ? "eye.slash" : "eye")
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .help(revealsToken ? "Hide token" : "Show token")
+
+                                    Button {
+                                        store.regenerateQueryServiceAuthenticationToken()
+                                    } label: {
+                                        Image(systemName: "arrow.clockwise")
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .help("Generate new token")
+
+                                    Button {
+                                        store.copyQueryServiceAuthenticationToken()
+                                    } label: {
+                                        Image(systemName: "doc.on.doc")
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .help("Copy token")
+                                }
+                            }
+                        }
+                    }
+                }
+
+                GroupBox("Browser Access") {
+                    VStack(spacing: 0) {
+                        settingsRow("Allowed Origins") {
+                            Picker("Allowed Origins", selection: corsPolicyBinding) {
+                                ForEach(QueryServiceCORSPolicy.allCases, id: \.self) { policy in
+                                    Text(policy.displayName)
+                                        .tag(policy)
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.segmented)
+                            .frame(width: 360)
+                        }
+
+                        if store.queryServiceSettings.corsPolicy == .custom {
+                            Divider()
+
+                            settingsRow("Origin") {
+                                TextField("https://app.example.com", text: customOriginBinding)
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.system(.body, design: .monospaced))
+                                    .frame(width: 440)
+                            }
+                        }
+                    }
+                }
+
+                if let validationMessage = store.queryServiceValidationMessage {
+                    Label(validationMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(20)
+        }
+    }
+
+    private var statusColor: Color {
+        if store.queryServiceIsRunning {
+            return .green
+        }
+        return store.queryServiceSettings.isEnabled ? .orange : .secondary
+    }
+
+    private var enabledBinding: Binding<Bool> {
+        Binding(
+            get: { store.queryServiceSettings.isEnabled },
+            set: { store.setQueryServiceEnabled($0) }
+        )
+    }
+
+    private var portBinding: Binding<Int> {
+        Binding(
+            get: { store.queryServiceSettings.port },
+            set: { store.setQueryServicePort($0) }
+        )
+    }
+
+    private var authenticationBinding: Binding<Bool> {
+        Binding(
+            get: { store.queryServiceSettings.requiresAuthentication },
+            set: { store.setQueryServiceAuthenticationRequired($0) }
+        )
+    }
+
+    private var tokenBinding: Binding<String> {
+        Binding(
+            get: { store.queryServiceSettings.authenticationToken },
+            set: { store.setQueryServiceAuthenticationToken($0) }
+        )
+    }
+
+    private var corsPolicyBinding: Binding<QueryServiceCORSPolicy> {
+        Binding(
+            get: { store.queryServiceSettings.corsPolicy },
+            set: { store.setQueryServiceCORSPolicy($0) }
+        )
+    }
+
+    private var customOriginBinding: Binding<String> {
+        Binding(
+            get: { store.queryServiceSettings.customAllowedOrigin },
+            set: { store.setQueryServiceCustomAllowedOrigin($0) }
+        )
+    }
+
+    private func settingsRow<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        HStack(spacing: 16) {
+            Text(title)
+                .foregroundStyle(.secondary)
+                .frame(width: 120, alignment: .leading)
+
+            content()
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 10)
+    }
+}
+
+private extension QueryServiceCORSPolicy {
+    var displayName: String {
+        switch self {
+        case .disabled:
+            return "Off"
+        case .loopback:
+            return "Loopback"
+        case .custom:
+            return "Custom"
+        }
     }
 }
 

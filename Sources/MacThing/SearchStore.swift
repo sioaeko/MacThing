@@ -177,6 +177,7 @@ private struct PersistedSearchSettings: Codable {
     var globalHotkeyChoice: GlobalHotkeyChoice?
     var appShortcutSettings: AppShortcutSettings?
     var launchAtLogin: Bool?
+    var queryServiceSettings: QueryServiceSettings?
 }
 
 private struct PersistedIndexLoadState: Sendable {
@@ -350,6 +351,9 @@ final class SearchStore: ObservableObject {
     @Published var globalHotkeyChoice: GlobalHotkeyChoice = .optionSpace
     @Published var appShortcutSettings = AppShortcutSettings.defaults
     @Published var launchAtLogin = false
+    @Published private(set) var queryServiceSettings = QueryServiceSettings.defaults
+    @Published private(set) var queryServiceIsRunning = false
+    @Published private(set) var queryServiceStatusText = "Stopped"
     @Published var fileListSources: [FileListSource] = []
     @Published var searchHistory: [SearchHistoryItem] = []
     @Published var userFilters: [UserSearchFilter] = []
@@ -363,6 +367,7 @@ final class SearchStore: ObservableObject {
     private var indexTask: Task<Void, Never>?
     private var loadIndexTask: Task<Void, Never>?
     private var saveSettingsTask: Task<Void, Never>?
+    private var queryServiceRestartTask: Task<Void, Never>?
     private var monitorReindexTasksByProfileID: [String: Task<Void, Never>] = [:]
     private var fileSystemMonitorsByProfileID: [String: FileSystemMonitor] = [:]
     private var queryHTTPServer: QueryHTTPServer?
@@ -451,6 +456,14 @@ final class SearchStore: ObservableObject {
 
     var activeIndexExclusionRules: IndexExclusionRules {
         activeIndexProfile?.exclusionRules ?? IndexExclusionRules()
+    }
+
+    var queryServiceEndpointText: String {
+        queryServiceSettings.endpointURL?.absoluteString ?? "Invalid endpoint"
+    }
+
+    var queryServiceValidationMessage: String? {
+        queryServiceSettings.validationMessage
     }
 
     var activeExcludedPathPrefixes: [String] {
@@ -1111,6 +1124,106 @@ final class SearchStore: ObservableObject {
         }
     }
 
+    func setQueryServiceEnabled(_ enabled: Bool) {
+        var settings = queryServiceSettings
+        settings.isEnabled = enabled
+        applyQueryServiceSettings(settings, restartImmediately: true)
+    }
+
+    func setQueryServicePort(_ port: Int) {
+        var settings = queryServiceSettings
+        settings.port = port
+        applyQueryServiceSettings(settings)
+    }
+
+    func setQueryServiceAuthenticationRequired(_ required: Bool) {
+        var settings = queryServiceSettings
+        settings.requiresAuthentication = required
+        if required,
+           settings.authenticationToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            settings.authenticationToken = QueryServiceSettings.generateAuthenticationToken()
+        }
+        applyQueryServiceSettings(settings, restartImmediately: true)
+    }
+
+    func setQueryServiceAuthenticationToken(_ token: String) {
+        var settings = queryServiceSettings
+        settings.authenticationToken = token
+        applyQueryServiceSettings(settings)
+    }
+
+    func regenerateQueryServiceAuthenticationToken() {
+        var settings = queryServiceSettings
+        settings.authenticationToken = QueryServiceSettings.generateAuthenticationToken()
+        applyQueryServiceSettings(settings, restartImmediately: true)
+    }
+
+    func setQueryServiceCORSPolicy(_ policy: QueryServiceCORSPolicy) {
+        var settings = queryServiceSettings
+        settings.corsPolicy = policy
+        applyQueryServiceSettings(settings, restartImmediately: true)
+    }
+
+    func setQueryServiceCustomAllowedOrigin(_ origin: String) {
+        var settings = queryServiceSettings
+        settings.customAllowedOrigin = origin
+        applyQueryServiceSettings(settings)
+    }
+
+    func resetQueryServiceSettings() {
+        applyQueryServiceSettings(.defaults, restartImmediately: true)
+    }
+
+    func copyQueryServiceEndpoint() {
+        guard let endpoint = queryServiceSettings.endpointURL?.absoluteString else {
+            return
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(endpoint, forType: .string)
+    }
+
+    func copyQueryServiceAuthenticationToken() {
+        let token = queryServiceSettings.authenticationToken
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else {
+            return
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(token, forType: .string)
+    }
+
+    private func applyQueryServiceSettings(
+        _ settings: QueryServiceSettings,
+        restartImmediately: Bool = false
+    ) {
+        guard settings != queryServiceSettings else {
+            return
+        }
+        queryServiceSettings = settings
+        saveSettings()
+        scheduleQueryServiceRestart(immediately: restartImmediately)
+    }
+
+    private func scheduleQueryServiceRestart(immediately: Bool) {
+        queryServiceRestartTask?.cancel()
+        queryServiceRestartTask = nil
+
+        if immediately {
+            restartQueryService()
+            return
+        }
+
+        queryServiceStatusText = queryServiceSettings.isEnabled ? "Applying..." : "Off"
+        queryServiceRestartTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard let self, !Task.isCancelled else {
+                return
+            }
+            self.queryServiceRestartTask = nil
+            self.restartQueryService()
+        }
+    }
+
     func revealSelected() {
         if selectedPaths.count > 1 {
             let urls = results
@@ -1541,6 +1654,7 @@ final class SearchStore: ObservableObject {
         globalHotkeyChoice = settings.globalHotkeyChoice ?? GlobalHotkeyChoice.recommended
         appShortcutSettings = settings.appShortcutSettings ?? .defaults
         launchAtLogin = settings.launchAtLogin ?? false
+        queryServiceSettings = settings.queryServiceSettings ?? queryServiceSettings
         if let visibleColumns = settings.visibleColumns, !visibleColumns.isEmpty {
             self.visibleColumns = visibleColumns
         }
@@ -1608,7 +1722,8 @@ final class SearchStore: ObservableObject {
             activeProfileID: activeProfileID,
             globalHotkeyChoice: globalHotkeyChoice,
             appShortcutSettings: appShortcutSettings,
-            launchAtLogin: launchAtLogin
+            launchAtLogin: launchAtLogin,
+            queryServiceSettings: queryServiceSettings
         )
 
         if let data = try? JSONEncoder().encode(settings) {
@@ -1970,9 +2085,22 @@ final class SearchStore: ObservableObject {
             return
         }
 
+        guard queryServiceSettings.isEnabled else {
+            queryServiceIsRunning = false
+            queryServiceStatusText = "Off"
+            return
+        }
+        guard let configuration = queryServiceSettings.serverConfiguration,
+              let port = UInt16(exactly: queryServiceSettings.port) else {
+            queryServiceIsRunning = false
+            queryServiceStatusText = queryServiceSettings.validationMessage ?? "Invalid configuration"
+            return
+        }
+
         do {
             queryHTTPServer = try QueryHTTPServer(
-                port: 16245,
+                port: port,
+                configuration: configuration,
                 searchHandler: { [queryServiceState] request in
                     queryServiceState.search(request: request)
                 },
@@ -1980,9 +2108,19 @@ final class SearchStore: ObservableObject {
                     queryServiceState.status()
                 }
             )
+            queryServiceIsRunning = true
+            queryServiceStatusText = "Running"
         } catch {
-            statusText = "Query service unavailable"
+            queryServiceIsRunning = false
+            queryServiceStatusText = "Unavailable: \(error.localizedDescription)"
         }
+    }
+
+    private func restartQueryService() {
+        queryHTTPServer?.stop()
+        queryHTTPServer = nil
+        queryServiceIsRunning = false
+        startQueryService()
     }
 
     private func startGlobalHotkey() {

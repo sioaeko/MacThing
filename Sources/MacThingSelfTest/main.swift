@@ -233,7 +233,67 @@ expect(
     "regex searches should not be treated as fuzzy preview searches"
 )
 
-func httpGet(port: UInt16, path: String, timeoutSeconds: Int = 5) throws -> String {
+let defaultQueryServiceSettings = QueryServiceSettings.defaults
+expect(
+    defaultQueryServiceSettings.isEnabled &&
+        defaultQueryServiceSettings.port == 16_245 &&
+        !defaultQueryServiceSettings.requiresAuthentication &&
+        defaultQueryServiceSettings.authenticationToken.count == 64 &&
+        defaultQueryServiceSettings.corsPolicy == .loopback &&
+        defaultQueryServiceSettings.validationMessage == nil,
+    "query service settings should provide a valid local-first default"
+)
+
+let protectedQueryServiceSettings = QueryServiceSettings(
+    port: 18_247,
+    requiresAuthentication: true,
+    authenticationToken: "test-token",
+    corsPolicy: .custom,
+    customAllowedOrigin: "HTTPS://Example.COM:8443/"
+)
+expect(
+    protectedQueryServiceSettings.validationMessage == nil &&
+        protectedQueryServiceSettings.serverConfiguration?.authorizationToken == "test-token" &&
+        protectedQueryServiceSettings.serverConfiguration?.corsPolicy == .custom("https://example.com:8443"),
+    "query service settings should normalize custom origins and build server configuration"
+)
+
+expect(
+    QueryHTTPServer.Configuration.normalizedOrigin("https://example.com/path") == nil &&
+        QueryHTTPServer.Configuration.normalizedOrigin("file://example.com") == nil &&
+        QueryHTTPServer.Configuration.normalizedOrigin("https://example.com:443/") == "https://example.com" &&
+        QueryServiceSettings(port: 80).validationMessage != nil,
+    "query service settings should reject unsafe origins and privileged ports"
+)
+
+let queryServiceSettingsData = try! JSONEncoder().encode(protectedQueryServiceSettings)
+let decodedQueryServiceSettings = try! JSONDecoder().decode(
+    QueryServiceSettings.self,
+    from: queryServiceSettingsData
+)
+expect(
+    decodedQueryServiceSettings == protectedQueryServiceSettings,
+    "query service settings should round-trip through persisted storage"
+)
+
+let decodedLegacyQueryServiceSettings = try! JSONDecoder().decode(
+    QueryServiceSettings.self,
+    from: Data("{}".utf8)
+)
+expect(
+    decodedLegacyQueryServiceSettings.port == 16_245 &&
+        decodedLegacyQueryServiceSettings.authenticationToken.count == 64 &&
+        decodedLegacyQueryServiceSettings.corsPolicy == .loopback,
+    "query service settings should supply safe defaults for older persisted data"
+)
+
+func httpRequest(
+    port: UInt16,
+    method: String,
+    path: String,
+    headers: [String: String] = [:],
+    timeoutSeconds: Int = 5
+) throws -> String {
     let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
     guard fd >= 0 else {
         throw NSError(domain: "MacThingSelfTest", code: 1)
@@ -260,7 +320,14 @@ func httpGet(port: UInt16, path: String, timeoutSeconds: Int = 5) throws -> Stri
         throw NSError(domain: "MacThingSelfTest", code: 2)
     }
 
-    let request = "GET \(path) HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+    let serializedHeaders = headers
+        .sorted { $0.key.localizedStandardCompare($1.key) == .orderedAscending }
+        .map { "\($0.key): \($0.value)\r\n" }
+        .joined()
+    let request = "\(method) \(path) HTTP/1.1\r\n" +
+        "Host: 127.0.0.1\r\n" +
+        serializedHeaders +
+        "Connection: close\r\n\r\n"
     request.withCString { pointer in
         _ = Darwin.write(fd, pointer, strlen(pointer))
     }
@@ -279,6 +346,21 @@ func httpGet(port: UInt16, path: String, timeoutSeconds: Int = 5) throws -> Stri
     }
 
     return String(decoding: response, as: UTF8.self)
+}
+
+func httpGet(
+    port: UInt16,
+    path: String,
+    headers: [String: String] = [:],
+    timeoutSeconds: Int = 5
+) throws -> String {
+    try httpRequest(
+        port: port,
+        method: "GET",
+        path: path,
+        headers: headers,
+        timeoutSeconds: timeoutSeconds
+    )
 }
 
 let nameMatch = FileEntry(
@@ -8450,6 +8532,201 @@ do {
     )
 } catch {
     fputs("Self-test failed: HTTP query service threw \(error)\n", stderr)
+    exit(1)
+}
+
+do {
+    let protectedPort: UInt16 = 18247
+    let protectedServer = try QueryHTTPServer(
+        port: protectedPort,
+        configuration: QueryHTTPServer.Configuration(
+            authorizationToken: "correct-token",
+            corsPolicy: .loopback
+        ),
+        searchHandler: { _ in
+            SearchResponse(entries: [photo], totalMatches: 1)
+        },
+        statusHandler: {
+            QueryHTTPServer.Status(
+                rootPath: "/Users/me",
+                indexedCount: 1,
+                resultCount: 1,
+                lastIndexedAt: nil,
+                statusText: "Ready"
+            )
+        }
+    )
+    defer {
+        protectedServer.stop()
+    }
+
+    let customOriginPort: UInt16 = 18248
+    let customOriginServer = try QueryHTTPServer(
+        port: customOriginPort,
+        configuration: QueryHTTPServer.Configuration(
+            corsPolicy: .custom("https://app.example.com")
+        ),
+        searchHandler: { _ in
+            SearchResponse(entries: [], totalMatches: 0)
+        },
+        statusHandler: {
+            QueryHTTPServer.Status(
+                rootPath: "/Users/me",
+                indexedCount: 0,
+                resultCount: 0,
+                lastIndexedAt: nil
+            )
+        }
+    )
+    defer {
+        customOriginServer.stop()
+    }
+
+    Thread.sleep(forTimeInterval: 0.1)
+
+    let missingTokenResponse = try httpGet(port: protectedPort, path: "/api/status")
+    expect(
+        missingTokenResponse.contains("401 Unauthorized") &&
+            missingTokenResponse.contains("WWW-Authenticate: Bearer realm=\"MacThing\""),
+        "HTTP query service should challenge requests without a configured bearer token"
+    )
+
+    let wrongTokenResponse = try httpGet(
+        port: protectedPort,
+        path: "/api/status",
+        headers: ["Authorization": "Bearer wrong-token"]
+    )
+    expect(
+        wrongTokenResponse.contains("401 Unauthorized"),
+        "HTTP query service should reject an incorrect bearer token"
+    )
+
+    let authorizedResponse = try httpGet(
+        port: protectedPort,
+        path: "/api/status",
+        headers: ["Authorization": "Bearer correct-token"]
+    )
+    expect(
+        authorizedResponse.contains("200 OK") &&
+            authorizedResponse.contains("\"indexedCount\":1"),
+        "HTTP query service should accept the configured bearer token"
+    )
+
+    let loopbackOriginResponse = try httpGet(
+        port: protectedPort,
+        path: "/api/status",
+        headers: [
+            "Authorization": "Bearer correct-token",
+            "Origin": "http://localhost:3000"
+        ]
+    )
+    expect(
+        loopbackOriginResponse.contains("200 OK") &&
+            loopbackOriginResponse.contains("Access-Control-Allow-Origin: http://localhost:3000") &&
+            loopbackOriginResponse.contains("Vary: Origin"),
+        "HTTP query service should allow loopback browser origins and echo the normalized origin"
+    )
+
+    let blockedOriginResponse = try httpGet(
+        port: protectedPort,
+        path: "/api/status",
+        headers: [
+            "Authorization": "Bearer correct-token",
+            "Origin": "https://untrusted.example"
+        ]
+    )
+    expect(
+        blockedOriginResponse.contains("403 Forbidden") &&
+            !blockedOriginResponse.contains("indexedCount"),
+        "HTTP query service should reject unapproved browser origins before returning data"
+    )
+
+    let preflightResponse = try httpRequest(
+        port: protectedPort,
+        method: "OPTIONS",
+        path: "/api/search",
+        headers: [
+            "Access-Control-Request-Headers": "authorization",
+            "Access-Control-Request-Method": "GET",
+            "Origin": "http://127.0.0.1:5173"
+        ]
+    )
+    expect(
+        preflightResponse.contains("204 No Content") &&
+            preflightResponse.contains("Access-Control-Allow-Origin: http://127.0.0.1:5173") &&
+            preflightResponse.contains("Access-Control-Allow-Methods: GET, OPTIONS") &&
+            preflightResponse.contains("Access-Control-Allow-Headers: Authorization, Content-Type"),
+        "HTTP query service should answer authorized loopback CORS preflight without a bearer token"
+    )
+
+    let customOriginResponse = try httpGet(
+        port: customOriginPort,
+        path: "/api/status",
+        headers: ["Origin": "https://app.example.com"]
+    )
+    let otherCustomOriginResponse = try httpGet(
+        port: customOriginPort,
+        path: "/api/status",
+        headers: ["Origin": "https://app.example.com:8443"]
+    )
+    expect(
+        customOriginResponse.contains("200 OK") &&
+            customOriginResponse.contains("Access-Control-Allow-Origin: https://app.example.com") &&
+            otherCustomOriginResponse.contains("403 Forbidden"),
+        "HTTP query service custom CORS policy should require an exact normalized origin"
+    )
+} catch {
+    fputs("Self-test failed: protected HTTP query service threw \(error)\n", stderr)
+    exit(1)
+}
+
+do {
+    let restartPort: UInt16 = 18249
+    var initialServer: QueryHTTPServer? = try QueryHTTPServer(
+        port: restartPort,
+        searchHandler: { _ in SearchResponse(entries: [], totalMatches: 0) },
+        statusHandler: {
+            QueryHTTPServer.Status(
+                rootPath: "/Users/me",
+                indexedCount: 0,
+                resultCount: 0,
+                lastIndexedAt: nil
+            )
+        }
+    )
+    initialServer?.stop()
+    initialServer = nil
+
+    let restartedServer = try QueryHTTPServer(
+        port: restartPort,
+        configuration: QueryHTTPServer.Configuration(authorizationToken: "restart-token"),
+        searchHandler: { _ in SearchResponse(entries: [], totalMatches: 0) },
+        statusHandler: {
+            QueryHTTPServer.Status(
+                rootPath: "/Users/me",
+                indexedCount: 4,
+                resultCount: 0,
+                lastIndexedAt: nil
+            )
+        }
+    )
+    defer {
+        restartedServer.stop()
+    }
+    Thread.sleep(forTimeInterval: 0.05)
+
+    let restartedResponse = try httpGet(
+        port: restartPort,
+        path: "/api/status",
+        headers: ["Authorization": "Bearer restart-token"]
+    )
+    expect(
+        restartedResponse.contains("200 OK") &&
+            restartedResponse.contains("\"indexedCount\":4"),
+        "HTTP query service should rebind the same port immediately after a settings restart"
+    )
+} catch {
+    fputs("Self-test failed: HTTP query service restart threw \(error)\n", stderr)
     exit(1)
 }
 

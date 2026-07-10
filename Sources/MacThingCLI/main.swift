@@ -12,7 +12,13 @@ struct MacThingCLI {
             }
 
             let url = try command.url()
-            let (data, response) = try await URLSession.shared.data(from: url)
+            var request = URLRequest(url: url)
+            let environmentToken = ProcessInfo.processInfo.environment["MACTHING_API_TOKEN"]
+            if let token = command.authorizationToken ?? environmentToken,
+               !token.isEmpty {
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            }
+            let (data, response) = try await URLSession.shared.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw CLIError("No HTTP response")
             }
@@ -35,8 +41,12 @@ struct MacThingCLI {
     private static func printHelp() {
         print("""
         Usage:
-          swift run MacThingCLI -- status [--port 16245]
+          swift run MacThingCLI -- status [--port 16245] [--token <token>]
           swift run MacThingCLI -- search <query> [options]
+
+        Connection options:
+          --port <port>        Query service port, default 16245
+          --token <token>      Bearer token; MACTHING_API_TOKEN is also supported
 
         Search options:
           --limit <n>, -n <n>, --max-results <n>
@@ -56,7 +66,6 @@ struct MacThingCLI {
                               Enable or disable whole-word matching
           --diacritics / --no-diacritics
                               Enable or disable diacritic-sensitive matching
-          --port <port>        Query service port, default 16245
         """)
     }
 }
@@ -65,6 +74,7 @@ private struct CLICommand {
     var endpoint: String
     var port: Int
     var queryItems: [URLQueryItem]
+    var authorizationToken: String?
     var shouldPrintHelp = false
 
     func url() throws -> URL {
@@ -89,13 +99,13 @@ private enum CommandLineParser {
             arguments.removeFirst()
         }
         guard let command = arguments.first else {
-            return CLICommand(endpoint: "", port: 16245, queryItems: [], shouldPrintHelp: true)
+            return CLICommand(endpoint: "", port: 16245, queryItems: [], authorizationToken: nil, shouldPrintHelp: true)
         }
         arguments.removeFirst()
 
         switch command {
         case "help", "--help", "-h":
-            return CLICommand(endpoint: "", port: 16245, queryItems: [], shouldPrintHelp: true)
+            return CLICommand(endpoint: "", port: 16245, queryItems: [], authorizationToken: nil, shouldPrintHelp: true)
         case "status":
             return try parseStatus(arguments)
         case "search":
@@ -107,22 +117,31 @@ private enum CommandLineParser {
 
     private static func parseStatus(_ arguments: [String]) throws -> CLICommand {
         var port = 16245
+        var authorizationToken: String?
         var cursor = 0
         while cursor < arguments.count {
             switch arguments[cursor] {
             case "--port":
-                port = try intValue(after: &cursor, in: arguments, option: "--port")
+                port = try portValue(after: &cursor, in: arguments)
+            case "--token":
+                authorizationToken = try tokenValue(after: &cursor, in: arguments)
             default:
                 throw CLIError("Unknown status option `\(arguments[cursor])`")
             }
             cursor += 1
         }
 
-        return CLICommand(endpoint: "/api/status", port: port, queryItems: [])
+        return CLICommand(
+            endpoint: "/api/status",
+            port: port,
+            queryItems: [],
+            authorizationToken: authorizationToken
+        )
     }
 
     private static func parseSearch(_ arguments: [String]) throws -> CLICommand {
         var port = 16245
+        var authorizationToken: String?
         var queryParts: [String] = []
         var queryItems: [URLQueryItem] = []
         var cursor = 0
@@ -131,7 +150,9 @@ private enum CommandLineParser {
             let argument = arguments[cursor]
             switch argument {
             case "--port":
-                port = try intValue(after: &cursor, in: arguments, option: argument)
+                port = try portValue(after: &cursor, in: arguments)
+            case "--token":
+                authorizationToken = try tokenValue(after: &cursor, in: arguments)
             case "--limit", "--sort", "--order", "--format", "--columns", "--offset":
                 queryItems.append(URLQueryItem(
                     name: String(argument.dropFirst(2)),
@@ -190,7 +211,12 @@ private enum CommandLineParser {
         }
 
         queryItems.insert(URLQueryItem(name: "q", value: queryParts.joined(separator: " ")), at: 0)
-        return CLICommand(endpoint: "/api/search", port: port, queryItems: queryItems)
+        return CLICommand(
+            endpoint: "/api/search",
+            port: port,
+            queryItems: queryItems,
+            authorizationToken: authorizationToken
+        )
     }
 
     private static func stringValue(after cursor: inout Int, in arguments: [String], option: String) throws -> String {
@@ -208,6 +234,22 @@ private enum CommandLineParser {
             throw CLIError("Invalid integer for \(option): \(rawValue)")
         }
         return value
+    }
+
+    private static func portValue(after cursor: inout Int, in arguments: [String]) throws -> Int {
+        let port = try intValue(after: &cursor, in: arguments, option: "--port")
+        guard (1...65_535).contains(port) else {
+            throw CLIError("Port must be between 1 and 65535")
+        }
+        return port
+    }
+
+    private static func tokenValue(after cursor: inout Int, in arguments: [String]) throws -> String {
+        let token = try stringValue(after: &cursor, in: arguments, option: "--token")
+        guard !token.isEmpty else {
+            throw CLIError("Authentication token cannot be empty")
+        }
+        return token
     }
 }
 
