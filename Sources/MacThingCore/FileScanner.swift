@@ -183,6 +183,7 @@ public enum FileScanner {
     public static func scanChangedPath(
         path: String,
         existingEntriesByPath: [String: FileEntry],
+        includeDescendants: Bool = true,
         includeHiddenFiles: Bool = true,
         skippedDirectoryNames: Set<String> = defaultSkippedDirectoryNames,
         excludedPathPrefixes: [String] = [],
@@ -211,7 +212,7 @@ public enum FileScanner {
         }
         entries.append(rootEntry)
 
-        if entries.first?.kind == .folder {
+        if includeDescendants, entries.first?.kind == .folder {
             entries.append(contentsOf: scan(configuration: configuration, existingEntriesByPath: existingEntriesByPath))
         }
 
@@ -221,6 +222,7 @@ public enum FileScanner {
     public static func scanChangedPath(
         path: String,
         existingEntriesByPath: [String: FileEntry],
+        includeDescendants: Bool = true,
         exclusionRules: IndexExclusionRules,
         runtimeExcludedPathPrefixes: [String] = [],
         skippedDirectoryNames: Set<String> = defaultSkippedDirectoryNames
@@ -229,6 +231,7 @@ public enum FileScanner {
         return scanChangedPath(
             path: path,
             existingEntriesByPath: existingEntriesByPath,
+            includeDescendants: includeDescendants,
             includeHiddenFiles: normalizedRules.includeHiddenFiles,
             skippedDirectoryNames: skippedDirectoryNames,
             excludedPathPrefixes: normalizedRules.excludedPathPrefixes + runtimeExcludedPathPrefixes,

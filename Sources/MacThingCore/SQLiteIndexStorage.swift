@@ -19,23 +19,33 @@ public enum SQLiteIndexStorage {
     }
 
     public static func upsert(entries: [FileEntry], rootPath: String, to url: URL) throws {
-        guard !entries.isEmpty else {
-            return
-        }
-
-        let database = try SQLiteDatabase(url: url)
-        try database.createSchema()
-        try database.upsert(entries: entries, rootPath: rootPath)
+        try apply(
+            IndexPersistenceDelta(upsertedEntries: entries, removedPaths: []),
+            rootPath: rootPath,
+            to: url
+        )
     }
 
     public static func delete(paths: [String], rootPath: String, from url: URL) throws {
-        guard !paths.isEmpty else {
+        try apply(
+            IndexPersistenceDelta(upsertedEntries: [], removedPaths: paths),
+            rootPath: rootPath,
+            to: url
+        )
+    }
+
+    public static func apply(
+        _ delta: IndexPersistenceDelta,
+        rootPath: String,
+        to url: URL
+    ) throws {
+        guard !delta.upsertedEntries.isEmpty || !delta.removedPaths.isEmpty else {
             return
         }
 
         let database = try SQLiteDatabase(url: url)
         try database.createSchema()
-        try database.delete(paths: paths, rootPath: rootPath)
+        try database.apply(delta, rootPath: rootPath)
     }
 
     public static func candidateEntries(
@@ -123,6 +133,9 @@ private final class SQLiteDatabase {
         if sqlite3_open_v2(url.path, &db, SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil) != SQLITE_OK {
             let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "Unable to open SQLite database"
             throw IndexStorageError.sqlite(message)
+        }
+        guard sqlite3_busy_timeout(db, 5_000) == SQLITE_OK else {
+            throw IndexStorageError.sqlite(String(cString: sqlite3_errmsg(db)))
         }
     }
 
@@ -466,20 +479,18 @@ private final class SQLiteDatabase {
         }
     }
 
-    func upsert(entries: [FileEntry], rootPath: String) throws {
+    func apply(_ delta: IndexPersistenceDelta, rootPath: String) throws {
         try transaction {
             try setMetaValue(rootPath, forKey: "rootPath")
             try setMetaValue(String(Date().timeIntervalSince1970), forKey: "updatedAt")
-            try delete(paths: entries.map(\.path), updateMeta: false)
-            try insert(entries: entries)
-        }
-    }
-
-    func delete(paths: [String], rootPath: String) throws {
-        try transaction {
-            try setMetaValue(rootPath, forKey: "rootPath")
-            try setMetaValue(String(Date().timeIntervalSince1970), forKey: "updatedAt")
-            try delete(paths: paths, updateMeta: false)
+            var pathsToDelete = Set(delta.removedPaths)
+            pathsToDelete.formUnion(delta.upsertedEntries.map(\.path))
+            if !pathsToDelete.isEmpty {
+                try delete(paths: Array(pathsToDelete), updateMeta: false)
+            }
+            if !delta.upsertedEntries.isEmpty {
+                try insert(entries: delta.upsertedEntries)
+            }
         }
     }
 

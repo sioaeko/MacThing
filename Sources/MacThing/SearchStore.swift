@@ -369,6 +369,9 @@ final class SearchStore: ObservableObject {
     private var saveSettingsTask: Task<Void, Never>?
     private var queryServiceRestartTask: Task<Void, Never>?
     private var monitorReindexTasksByProfileID: [String: Task<Void, Never>] = [:]
+    private let indexPersistenceCoordinator = IndexPersistenceCoordinator { message in
+        NSLog("MacThing: %@", message)
+    }
     private var fileSystemMonitorsByProfileID: [String: FileSystemMonitor] = [:]
     private var queryHTTPServer: QueryHTTPServer?
     private var globalHotkeyController: GlobalHotkeyController?
@@ -1850,7 +1853,9 @@ final class SearchStore: ObservableObject {
             }
         }
 
-        entries = FileIndex(entries: Array(combinedByPath.values)).entries
+        entries = combinedByPath.values.sorted { lhs, rhs in
+            lhs.path.localizedStandardCompare(rhs.path) == .orderedAscending
+        }
         searchDataRevision &+= 1
     }
 
@@ -1898,6 +1903,14 @@ final class SearchStore: ObservableObject {
             fileIndex.replaceAll(entries)
         } else {
             auxiliaryProfileEntriesByID[profileID] = entries
+        }
+    }
+
+    private func replaceIndex(_ index: FileIndex, forProfileID profileID: String) {
+        if profileID == activeProfileID {
+            fileIndex = index
+        } else {
+            auxiliaryProfileEntriesByID[profileID] = Array(index.snapshotByPath.values)
         }
     }
 
@@ -2065,7 +2078,10 @@ final class SearchStore: ObservableObject {
         let monitor = FileSystemMonitor(
             rootURL: URL(fileURLWithPath: profile.rootPath),
             excludedPathPrefixes: effectiveExcludedPathPrefixes(for: profile),
-            sinceEventID: profile.lastFSEventID,
+            // Start from the live stream. Replaying a stale per-host event ID can
+            // stall delivery after reboot/volume changes and previously caused
+            // fresh files to remain absent until a manual reindex.
+            sinceEventID: nil,
             onChange: { [weak self, profileID = profile.id] changes, latestEventID in
                 Task { @MainActor in
                     self?.handleFileSystemChanges(
@@ -2077,7 +2093,13 @@ final class SearchStore: ObservableObject {
             }
         )
         fileSystemMonitorsByProfileID[profile.id] = monitor
-        monitor.start()
+        guard monitor.start() else {
+            fileSystemMonitorsByProfileID.removeValue(forKey: profile.id)
+            indexFreshnessWarning = "Live monitoring could not start for \(profile.displayName)."
+            statusText = "Saved index loaded; live monitoring unavailable."
+            updateQueryServiceState()
+            return
+        }
     }
 
     private func startQueryService() {
@@ -2168,20 +2190,29 @@ final class SearchStore: ObservableObject {
         }
         pendingFileSystemChangesByProfileID[profileID] = pendingChanges
 
-        monitorReindexTasksByProfileID[profileID]?.cancel()
+        scheduleFileSystemChangeFlush(profileID: profileID)
+    }
 
+    private func scheduleFileSystemChangeFlush(profileID: String) {
+        guard monitorReindexTasksByProfileID[profileID] == nil else {
+            return
+        }
         monitorReindexTasksByProfileID[profileID] = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(900))
             guard let self, !Task.isCancelled else {
                 return
             }
+            self.monitorReindexTasksByProfileID.removeValue(forKey: profileID)
             if self.isIndexing && profileID == self.activeProfileID {
+                self.scheduleFileSystemChangeFlush(profileID: profileID)
                 return
             }
             let pendingChanges = self.pendingFileSystemChangesByProfileID[profileID] ?? [:]
             let changes = Array(pendingChanges.values)
             self.pendingFileSystemChangesByProfileID.removeValue(forKey: profileID)
-            self.monitorReindexTasksByProfileID.removeValue(forKey: profileID)
+            guard !changes.isEmpty else {
+                return
+            }
             self.applyFileSystemChanges(changes: changes, profileID: profileID)
         }
     }
@@ -2192,12 +2223,6 @@ final class SearchStore: ObservableObject {
         }
 
         let rootPath = profile.rootPath
-        let normalizedPaths = coalescedChangedPaths(for: changes, rootPath: rootPath)
-
-        if normalizedPaths.isEmpty {
-            return
-        }
-
         if changes.contains(where: \.requiresFullScan) {
             let reason = changes.compactMap(\.fullScanReason).first ?? "Filesystem full scan"
             if changes.contains(where: \.isEventHistoryLoss), !entries.isEmpty {
@@ -2207,6 +2232,16 @@ final class SearchStore: ObservableObject {
                 return
             }
             reindexProfile(profileID: profileID, reason: "Full rescan: \(reason)")
+            return
+        }
+
+        let normalizedChangesByPath = normalizedChangesByPath(for: changes)
+        let normalizedPaths = coalescedChangedPaths(
+            changesByPath: normalizedChangesByPath,
+            rootPath: rootPath
+        )
+
+        if normalizedPaths.isEmpty {
             return
         }
 
@@ -2228,24 +2263,48 @@ final class SearchStore: ObservableObject {
             let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
 
             if exists {
-                removedPaths.append(contentsOf: profileIndex.remove(path: path))
+                let change = normalizedChangesByPath[path]
+                let includeDescendants = change?.shouldScanDescendants ?? true
+                if includeDescendants {
+                    if isDirectory.boolValue {
+                        removedPaths.append(contentsOf: profileIndex.remove(path: path))
+                    } else {
+                        removedPaths.append(contentsOf: profileIndex.removeExact(path: path))
+                    }
+                }
                 let scannedEntries = FileScanner.scanChangedPath(
                     path: path,
                     existingEntriesByPath: existingEntriesByPath,
+                    includeDescendants: includeDescendants,
                     exclusionRules: exclusionRules,
                     runtimeExcludedPathPrefixes: runtimeExcludedPathPrefixes
                 )
-                let restoredEntries = scannedEntries.map { entry in
-                    Self.restoringRunState(
+                var restoredEntries: [FileEntry] = []
+                restoredEntries.reserveCapacity(scannedEntries.count)
+                for entry in scannedEntries {
+                    let restored = Self.restoringRunState(
                         for: entry,
                         existingEntriesByPath: existingEntriesByPath,
-                        existingEntriesByIdentity: existingEntriesByIdentity
+                        existingEntriesByIdentity: existingEntriesByIdentity,
+                        allowsMovePairing: change?.isRename == true
                     )
+                    if let movedFromPath = restored.movedFromPath {
+                        if restored.entry.kind == .folder {
+                            removedPaths.append(contentsOf: profileIndex.remove(path: movedFromPath))
+                        } else {
+                            removedPaths.append(contentsOf: profileIndex.removeExact(path: movedFromPath))
+                        }
+                    }
+                    restoredEntries.append(restored.entry)
                 }
                 profileIndex.upsert(restoredEntries)
                 upsertedEntries.append(contentsOf: restoredEntries)
             } else {
-                removedPaths.append(contentsOf: profileIndex.remove(path: path))
+                if normalizedChangesByPath[path]?.isNonDirectoryItem == true {
+                    removedPaths.append(contentsOf: profileIndex.removeExact(path: path))
+                } else {
+                    removedPaths.append(contentsOf: profileIndex.remove(path: path))
+                }
             }
         }
 
@@ -2255,7 +2314,7 @@ final class SearchStore: ObservableObject {
             return
         }
 
-        replaceEntries(profileIndex.entries, forProfileID: profileID)
+        replaceIndex(profileIndex, forProfileID: profileID)
         rebuildEntriesFromIndexes()
         storedIndexedCount = entries.count
         lastIndexedAt = Date()
@@ -2277,13 +2336,13 @@ final class SearchStore: ObservableObject {
 
     private nonisolated static func identityMap(
         for entriesByPath: [String: FileEntry]
-    ) -> [String: FileEntry] {
-        var entriesByIdentity: [String: FileEntry] = [:]
+    ) -> [String: [FileEntry]] {
+        var entriesByIdentity: [String: [FileEntry]] = [:]
         for entry in entriesByPath.values {
             guard let identityKey = entry.identityKey else {
                 continue
             }
-            entriesByIdentity[identityKey] = entry
+            entriesByIdentity[identityKey, default: []].append(entry)
         }
         return entriesByIdentity
     }
@@ -2291,37 +2350,50 @@ final class SearchStore: ObservableObject {
     private nonisolated static func restoringRunState(
         for entry: FileEntry,
         existingEntriesByPath: [String: FileEntry],
-        existingEntriesByIdentity: [String: FileEntry]
-    ) -> FileEntry {
+        existingEntriesByIdentity: [String: [FileEntry]],
+        allowsMovePairing: Bool
+    ) -> (entry: FileEntry, movedFromPath: String?) {
         if existingEntriesByPath[entry.path] != nil {
-            return entry
+            return (entry, nil)
         }
 
-        guard let identityKey = entry.identityKey,
-              let previousEntry = existingEntriesByIdentity[identityKey] else {
-            return entry
+        guard allowsMovePairing,
+              let identityKey = entry.identityKey,
+              let previousEntry = existingEntriesByIdentity[identityKey]?.first(where: {
+                  !FileManager.default.fileExists(atPath: $0.path)
+              }) else {
+            return (entry, nil)
         }
 
-        return entry.preservingRunState(from: previousEntry)
+        return (entry.preservingRunState(from: previousEntry), previousEntry.path)
     }
 
-    private func normalizedChangedPaths(for changes: [FileSystemChange]) -> [String] {
-        var paths = Set<String>()
+    private func normalizedChangesByPath(
+        for changes: [FileSystemChange]
+    ) -> [String: FileSystemChange] {
+        var normalizedChanges: [String: FileSystemChange] = [:]
         for change in changes {
-            paths.insert(change.path)
-
-            if change.shouldScanParent {
-                let parent = URL(fileURLWithPath: change.path).deletingLastPathComponent().path
-                paths.insert(parent)
+            let path = URL(fileURLWithPath: change.path).standardizedFileURL.path
+            let normalizedChange = FileSystemChange(
+                path: path,
+                flags: change.flags,
+                eventID: change.eventID
+            )
+            if let existing = normalizedChanges[path] {
+                normalizedChanges[path] = existing.merging(normalizedChange)
+            } else {
+                normalizedChanges[path] = normalizedChange
             }
         }
-        return Array(paths)
+        return normalizedChanges
     }
 
-    private func coalescedChangedPaths(for changes: [FileSystemChange], rootPath: String) -> [String] {
+    private func coalescedChangedPaths(
+        changesByPath: [String: FileSystemChange],
+        rootPath: String
+    ) -> [String] {
         let rootPath = URL(fileURLWithPath: rootPath).standardizedFileURL.path
-        let sortedPaths = normalizedChangedPaths(for: changes)
-            .map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+        let sortedPaths = changesByPath.keys
             .filter { $0 != rootPath }
             .sorted { lhs, rhs in
                 if lhs.count == rhs.count {
@@ -2330,23 +2402,26 @@ final class SearchStore: ObservableObject {
                 return lhs.count < rhs.count
             }
 
-        var coalescedSet: Set<String> = []
+        var subtreeRoots: Set<String> = []
         var coalescedPaths: [String] = []
         for path in sortedPaths {
-            // Check if any ancestor is already coalesced by walking up "/" boundaries
+            // Only a create/remove/rename covers descendants. Metadata changes
+            // on a directory must not hide more specific child events.
             var isChild = false
             var searchEnd = path.startIndex
             while let slashIndex = path[path.index(after: searchEnd)...].firstIndex(of: "/") {
                 let prefix = String(path[..<slashIndex])
-                if coalescedSet.contains(prefix) {
+                if subtreeRoots.contains(prefix) {
                     isChild = true
                     break
                 }
                 searchEnd = slashIndex
             }
             if !isChild {
-                coalescedSet.insert(path)
                 coalescedPaths.append(path)
+                if changesByPath[path]?.affectsSubtree == true {
+                    subtreeRoots.insert(path)
+                }
             }
         }
         return coalescedPaths
@@ -2365,9 +2440,7 @@ final class SearchStore: ObservableObject {
         }
 
         let snapshot = IndexSnapshot(rootPath: rootPath, entries: entries)
-        Task.detached(priority: .utility) {
-            try? IndexStorage.save(snapshot, to: indexURL)
-        }
+        indexPersistenceCoordinator.save(snapshot, to: indexURL)
     }
 
     private func persistIncremental(upsertedEntries: [FileEntry], removedPaths: [String]) {
@@ -2379,10 +2452,11 @@ final class SearchStore: ObservableObject {
         }
 
         let rootPath = rootPath
-        Task.detached(priority: .utility) {
-            try? IndexStorage.delete(paths: removedPaths, rootPath: rootPath, from: indexURL)
-            try? IndexStorage.upsert(entries: upsertedEntries, rootPath: rootPath, to: indexURL)
-        }
+        indexPersistenceCoordinator.apply(
+            IndexPersistenceDelta(upsertedEntries: upsertedEntries, removedPaths: removedPaths),
+            rootPath: rootPath,
+            to: indexURL
+        )
     }
 
     private func persistIncremental(
@@ -2398,10 +2472,11 @@ final class SearchStore: ObservableObject {
             return
         }
 
-        Task.detached(priority: .utility) {
-            try? IndexStorage.delete(paths: removedPaths, rootPath: rootPath, from: indexURL)
-            try? IndexStorage.upsert(entries: upsertedEntries, rootPath: rootPath, to: indexURL)
-        }
+        indexPersistenceCoordinator.apply(
+            IndexPersistenceDelta(upsertedEntries: upsertedEntries, removedPaths: removedPaths),
+            rootPath: rootPath,
+            to: indexURL
+        )
     }
 
     private func recordRun(for entry: FileEntry) {

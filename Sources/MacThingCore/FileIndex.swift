@@ -45,6 +45,11 @@ public struct FileIndex: Sendable {
     }
 
     @discardableResult
+    public mutating func removeExact(path: String) -> [String] {
+        entriesByPath.removeValue(forKey: path) == nil ? [] : [path]
+    }
+
+    @discardableResult
     public mutating func remove(prefixes: [String]) -> [String] {
         guard !prefixes.isEmpty else {
             return []

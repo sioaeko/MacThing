@@ -5760,6 +5760,22 @@ do {
             changedEntries.contains { $0.path == canonicalChangedFilePath },
         "scanChangedPath should include the changed directory and its child files"
     )
+    let changedDirectoryOnly = FileScanner.scanChangedPath(
+        path: temporaryDirectory.path,
+        existingEntriesByPath: [:],
+        includeDescendants: false
+    )
+    expect(
+        changedDirectoryOnly.map(\.path) == [canonicalTemporaryDirectoryPath],
+        "directory metadata events should refresh only the directory entry"
+    )
+    var exactRemovalIndex = FileIndex(entries: changedEntries)
+    let exactRemovedPaths = exactRemovalIndex.removeExact(path: canonicalTemporaryDirectoryPath)
+    expect(
+        exactRemovedPaths == [canonicalTemporaryDirectoryPath] &&
+            exactRemovalIndex.entry(path: canonicalChangedFilePath) != nil,
+        "exact index removal should not scan or remove descendants"
+    )
 
     let changedFileEntry = changedEntries.first { $0.path == canonicalChangedFilePath }
     expect(
@@ -6362,6 +6378,125 @@ do {
         persistedEntryCount == 2,
         "SQLite index storage should expose persisted entry counts without loading entries"
     )
+
+    let atomicDeltaURL = temporaryDirectory.appending(path: "AtomicDelta.db")
+    let atomicOldEntry = FileEntry(
+        path: "/Users/me/Atomic/Old.txt",
+        name: "Old.txt",
+        parent: "/Users/me/Atomic",
+        kind: .file,
+        byteSize: 1,
+        modifiedAt: Date(timeIntervalSince1970: 1)
+    )
+    let atomicUpdatedEntry = FileEntry(
+        path: document.path,
+        name: document.name,
+        parent: document.parent,
+        kind: document.kind,
+        byteSize: 9_001,
+        modifiedAt: Date(timeIntervalSince1970: 9_001)
+    )
+    let atomicNewEntry = FileEntry(
+        path: "/Users/me/Atomic/New.txt",
+        name: "New.txt",
+        parent: "/Users/me/Atomic",
+        kind: .file,
+        byteSize: 2,
+        modifiedAt: Date(timeIntervalSince1970: 2)
+    )
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: temporaryDirectory.path, entries: [atomicOldEntry, document]),
+        to: atomicDeltaURL
+    )
+    try IndexStorage.apply(
+        IndexPersistenceDelta(
+            upsertedEntries: [atomicUpdatedEntry, atomicNewEntry],
+            removedPaths: [atomicOldEntry.path]
+        ),
+        rootPath: temporaryDirectory.path,
+        to: atomicDeltaURL
+    )
+    let atomicDeltaSnapshot = try IndexStorage.load(from: atomicDeltaURL)
+    expect(
+        Set(atomicDeltaSnapshot.entries.map(\.path)) == Set([atomicUpdatedEntry.path, atomicNewEntry.path]) &&
+            atomicDeltaSnapshot.entries.first { $0.path == atomicUpdatedEntry.path }?.byteSize == 9_001,
+        "SQLite persistence deltas should delete and upsert in one catalog update"
+    )
+    let atomicOldCandidates = try IndexStorage.candidateEntries(
+        terms: ["Old"],
+        limit: 10,
+        from: atomicDeltaURL
+    )
+    let atomicNewCandidates = try IndexStorage.candidateEntries(
+        terms: ["New"],
+        limit: 10,
+        from: atomicDeltaURL
+    )
+    expect(
+        atomicOldCandidates.isEmpty && atomicNewCandidates.map(\.path) == [atomicNewEntry.path],
+        "atomic persistence deltas should update base, FTS, and trigram rows together"
+    )
+
+    let coordinatedURL = temporaryDirectory.appending(path: "CoordinatedWrites.db")
+    let coordinatedEntryV1 = FileEntry(
+        path: "/Users/me/Coordinated/Ordered.txt",
+        name: "Ordered.txt",
+        parent: "/Users/me/Coordinated",
+        kind: .file,
+        byteSize: 1,
+        modifiedAt: Date(timeIntervalSince1970: 1)
+    )
+    let coordinatedEntryV2 = FileEntry(
+        path: coordinatedEntryV1.path,
+        name: coordinatedEntryV1.name,
+        parent: coordinatedEntryV1.parent,
+        kind: coordinatedEntryV1.kind,
+        byteSize: 2,
+        modifiedAt: Date(timeIntervalSince1970: 2)
+    )
+    let persistenceCoordinator = IndexPersistenceCoordinator()
+    persistenceCoordinator.save(
+        IndexSnapshot(rootPath: temporaryDirectory.path, entries: [coordinatedEntryV1]),
+        to: coordinatedURL
+    )
+    persistenceCoordinator.apply(
+        IndexPersistenceDelta(upsertedEntries: [coordinatedEntryV2], removedPaths: []),
+        rootPath: temporaryDirectory.path,
+        to: coordinatedURL
+    )
+    persistenceCoordinator.waitForPendingWrites()
+    let coordinatedSnapshot = try IndexStorage.load(from: coordinatedURL)
+    expect(
+        coordinatedSnapshot.entries.first?.byteSize == 2,
+        "index persistence coordinator should preserve enqueue order"
+    )
+
+    let concurrentWritesURL = temporaryDirectory.appending(path: "ConcurrentWrites.db")
+    try IndexStorage.save(
+        IndexSnapshot(rootPath: temporaryDirectory.path, entries: []),
+        to: concurrentWritesURL
+    )
+    DispatchQueue.concurrentPerform(iterations: 16) { index in
+        let entry = FileEntry(
+            path: "/Users/me/Concurrent/Item-\(index).txt",
+            name: "Item-\(index).txt",
+            parent: "/Users/me/Concurrent",
+            kind: .file,
+            byteSize: Int64(index),
+            modifiedAt: Date(timeIntervalSince1970: TimeInterval(index))
+        )
+        try? IndexStorage.apply(
+            IndexPersistenceDelta(upsertedEntries: [entry], removedPaths: []),
+            rootPath: temporaryDirectory.path,
+            to: concurrentWritesURL
+        )
+    }
+    let concurrentEntryCount = try IndexStorage.entryCount(from: concurrentWritesURL)
+    expect(
+        concurrentEntryCount == 16,
+        "SQLite busy handling should retain concurrent index updates"
+    )
+
     let persistedNoiseEntry = FileEntry(
         path: "/Users/me/Project/.venv/lib/site.py",
         name: "site.py",

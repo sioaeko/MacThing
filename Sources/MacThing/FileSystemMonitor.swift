@@ -37,9 +37,25 @@ struct FileSystemChange: Sendable {
         return nil
     }
 
-    var shouldScanParent: Bool {
-        contains(kFSEventStreamEventFlagItemRenamed) ||
-            contains(kFSEventStreamEventFlagItemRemoved)
+    var isRename: Bool {
+        contains(kFSEventStreamEventFlagItemRenamed)
+    }
+
+    var isDirectory: Bool {
+        contains(kFSEventStreamEventFlagItemIsDir)
+    }
+
+    var isNonDirectoryItem: Bool {
+        contains(kFSEventStreamEventFlagItemIsFile) ||
+            contains(kFSEventStreamEventFlagItemIsSymlink)
+    }
+
+    var shouldScanDescendants: Bool {
+        contains(kFSEventStreamEventFlagItemCreated) || isRename
+    }
+
+    var affectsSubtree: Bool {
+        shouldScanDescendants || contains(kFSEventStreamEventFlagItemRemoved)
     }
 
     func merging(_ other: FileSystemChange) -> FileSystemChange {
@@ -76,7 +92,8 @@ final class FileSystemMonitor: @unchecked Sendable {
         stop()
     }
 
-    func start() {
+    @discardableResult
+    func start() -> Bool {
         stop()
 
         var context = FSEventStreamContext(
@@ -105,11 +122,17 @@ final class FileSystemMonitor: @unchecked Sendable {
         )
 
         guard let stream else {
-            return
+            return false
         }
 
         FSEventStreamSetDispatchQueue(stream, DispatchQueue.main)
-        FSEventStreamStart(stream)
+        guard FSEventStreamStart(stream) else {
+            FSEventStreamInvalidate(stream)
+            FSEventStreamRelease(stream)
+            self.stream = nil
+            return false
+        }
+        return true
     }
 
     func stop() {

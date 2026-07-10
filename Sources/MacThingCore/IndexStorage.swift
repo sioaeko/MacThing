@@ -59,6 +59,53 @@ public struct IndexPersistenceDelta: Sendable {
     }
 }
 
+/// Serializes background catalog writes so a stale delta cannot overtake a
+/// newer one. SQLite still serves concurrent WAL readers on separate connections.
+public final class IndexPersistenceCoordinator: @unchecked Sendable {
+    public typealias ErrorHandler = @Sendable (String) -> Void
+
+    private let queue = DispatchQueue(label: "MacThing.IndexPersistence", qos: .utility)
+    private let errorHandler: ErrorHandler?
+
+    public init(errorHandler: ErrorHandler? = nil) {
+        self.errorHandler = errorHandler
+    }
+
+    public func save(_ snapshot: IndexSnapshot, to url: URL) {
+        enqueue(operation: "save", url: url) {
+            try IndexStorage.save(snapshot, to: url)
+        }
+    }
+
+    public func apply(_ delta: IndexPersistenceDelta, rootPath: String, to url: URL) {
+        guard !delta.upsertedEntries.isEmpty || !delta.removedPaths.isEmpty else {
+            return
+        }
+        enqueue(operation: "update", url: url) {
+            try IndexStorage.apply(delta, rootPath: rootPath, to: url)
+        }
+    }
+
+    public func waitForPendingWrites() {
+        queue.sync { }
+    }
+
+    private func enqueue(
+        operation: String,
+        url: URL,
+        body: @escaping @Sendable () throws -> Void
+    ) {
+        let errorHandler = errorHandler
+        queue.async {
+            do {
+                try body()
+            } catch {
+                errorHandler?("Index \(operation) failed for \(url.path): \(error.localizedDescription)")
+            }
+        }
+    }
+}
+
 public enum IndexStorage {
     public static func applicationSupportDirectory() throws -> URL {
         let supportURL = try FileManager.default.url(
@@ -103,6 +150,10 @@ public enum IndexStorage {
 
     public static func delete(paths: [String], rootPath: String, from url: URL) throws {
         try SQLiteIndexStorage.delete(paths: paths, rootPath: rootPath, from: url)
+    }
+
+    public static func apply(_ delta: IndexPersistenceDelta, rootPath: String, to url: URL) throws {
+        try SQLiteIndexStorage.apply(delta, rootPath: rootPath, to: url)
     }
 
     public static func candidateEntries(terms: [String], limit: Int, from url: URL) throws -> [FileEntry] {
